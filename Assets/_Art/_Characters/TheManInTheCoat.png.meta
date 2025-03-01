@@ -1,0 +1,668 @@
+fileFormatVersion: 2
+guid: 40a48dc43bb484ab8b1d728e02ed11eb
+TextureImporter:
+  internalIDToNameTable: []
+  externalObjects: {}
+  serializedVersion: 13
+  mipmaps:
+    mipMapMode: 0
+    enableMipMap: 0
+    sRGBTexture: 1
+    linearTexture: 0
+    fadeOut: 0
+    borderMipMap: 0
+    mipMapsPreserveCoverage: 0
+    alphaTestReferenceValue: 0.5
+    mipMapFadeDistanceStart: 1
+    mipMapFadeDistanceEnd: 3
+  bumpmap:
+    convertToNormalMap: 0
+    externalNormalMap: 0
+    heightScale: 0.25
+    normalMapFilter: 0
+    flipGreenChannel: 0
+  isReadable: 0
+  streamingMipmaps: 0
+  streamingMipmapsPriority: 0
+  vTOnly: 0
+  ignoreMipmapLimit: 0
+  grayScaleToAlpha: 0
+  generateCubemap: 6
+  cubemapConvolution: 0
+  seamlessCubemap: 0
+  textureFormat: 1
+  maxTextureSize: 2048
+  textureSettings:
+    serializedVersion: 2
+    filterMode: 1
+    aniso: 1
+    mipBias: 0
+    wrapU: 1
+    wrapV: 1
+    wrapW: 0
+  nPOTScale: 0
+  lightmap: 0
+  compressionQuality: 50
+  spriteMode: 2
+  spriteExtrude: 1
+  spriteMeshType: 1
+  alignment: 0
+  spritePivot: {x: 0.5, y: 0.5}
+  spritePixelsToUnits: 100
+  spriteBorder: {x: 0, y: 0, z: 0, w: 0}
+  spriteGenerateFallbackPhysicsShape: 1
+  alphaUsage: 1
+  alphaIsTransparency: 1
+  spriteTessellationDetail: -1
+  textureType: 8
+  textureShape: 1
+  singleChannelComponent: 0
+  flipbookRows: 1
+  flipbookColumns: 1
+  maxTextureSizeSet: 0
+  compressionQualitySet: 0
+  textureFormatSet: 0
+  ignorePngGamma: 0
+  applyGammaDecoding: 0
+  swizzle: 50462976
+  cookieLightType: 0
+  platformSettings:
+  - serializedVersion: 3
+    buildTarget: DefaultTexturePlatform
+    maxTextureSize: 2048
+    resizeAlgorithm: 0
+    textureFormat: -1
+    textureCompression: 1
+    compressionQuality: 50
+    crunchedCompression: 0
+    allowsAlphaSplitting: 0
+    overridden: 0
+    ignorePlatformSupport: 0
+    androidETC2FallbackOverride: 0
+    forceMaximumCompressionQuality_BC6H_BC7: 0
+  - serializedVersion: 3
+    buildTarget: Standalone
+    maxTextureSize: 2048
+    resizeAlgorithm: 0
+    textureFormat: -1
+    textureCompression: 1
+    compressionQuality: 50
+    crunchedCompression: 0
+    allowsAlphaSplitting: 0
+    overridden: 0
+    ignorePlatformSupport: 0
+    androidETC2FallbackOverride: 0
+    forceMaximumCompressionQuality_BC6H_BC7: 0
+  - serializedVersion: 3
+    buildTarget: iPhone
+    maxTextureSize: 2048
+    resizeAlgorithm: 0
+    textureFormat: -1
+    textureCompression: 1
+    compressionQuality: 50
+    crunchedCompression: 0
+    allowsAlphaSplitting: 0
+    overridden: 0
+    ignorePlatformSupport: 0
+    androidETC2FallbackOverride: 0
+    forceMaximumCompressionQuality_BC6H_BC7: 0
+  - serializedVersion: 3
+    buildTarget: WebGL
+    maxTextureSize: 2048
+    resizeAlgorithm: 0
+    textureFormat: -1
+    textureCompression: 1
+    compressionQuality: 50
+    crunchedCompression: 0
+    allowsAlphaSplitting: 0
+    overridden: 0
+    ignorePlatformSupport: 0
+    androidETC2FallbackOverride: 0
+    forceMaximumCompressionQuality_BC6H_BC7: 0
+  spriteSheet:
+    serializedVersion: 2
+    sprites:
+    - serializedVersion: 2
+      name: TheManInTheCoat_0
+      rect:
+        serializedVersion: 2
+        x: 0
+        y: 2561.6667
+        width: 512
+        height: 512.3333
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 0a1e2a07570a942bd8dd043cfdd3024f
+      internalID: -1687703949
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: TheManInTheCoat_1
+      rect:
+        serializedVersion: 2
+        x: 512
+        y: 2561.6667
+        width: 512
+        height: 512.3333
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: a37ee417be9ce43f4a50f20e680c8cc1
+      internalID: 680913131
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: TheManInTheCoat_2
+      rect:
+        serializedVersion: 2
+        x: 1024
+        y: 2561.6667
+        width: 512
+        height: 512.3333
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 64a083a5d980845c89fb51d73cef4891
+      internalID: -2082756512
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: TheManInTheCoat_3
+      rect:
+        serializedVersion: 2
+        x: 1536
+        y: 2561.6667
+        width: 512
+        height: 512.3333
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 4fea11d92e67a4ddc8284d7df16a2b39
+      internalID: 269074245
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: TheManInTheCoat_4
+      rect:
+        serializedVersion: 2
+        x: 0
+        y: 2049.6667
+        width: 512
+        height: 512.3333
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: be80efa0e43e9492da63d8f6f6de9914
+      internalID: 1705739247
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: TheManInTheCoat_5
+      rect:
+        serializedVersion: 2
+        x: 512
+        y: 2049.6667
+        width: 512
+        height: 512.3333
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 47bb84310ef1b46eb932107ccfaacbb3
+      internalID: 962339231
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: TheManInTheCoat_6
+      rect:
+        serializedVersion: 2
+        x: 1024
+        y: 2049.6667
+        width: 512
+        height: 512.3333
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: e0ab07473009a43a1bb1afaca261b2fa
+      internalID: -272503254
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: TheManInTheCoat_7
+      rect:
+        serializedVersion: 2
+        x: 1536
+        y: 2049.6667
+        width: 512
+        height: 512.3333
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 89d5551bea6bf40f98d2074d7f7b1c7f
+      internalID: 1213735132
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: TheManInTheCoat_8
+      rect:
+        serializedVersion: 2
+        x: 0
+        y: 1537.6667
+        width: 512
+        height: 512.3333
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 327462f91c89e417cb8aae098169b38f
+      internalID: 240614098
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: TheManInTheCoat_9
+      rect:
+        serializedVersion: 2
+        x: 512
+        y: 1537.6667
+        width: 512
+        height: 512.3333
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: e11658c70c0c048e190744498af7f7e0
+      internalID: -1506930501
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: TheManInTheCoat_10
+      rect:
+        serializedVersion: 2
+        x: 1024
+        y: 1537.6667
+        width: 512
+        height: 512.3333
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 001269a8036484807aafec3e7f049cd8
+      internalID: 1666839708
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: TheManInTheCoat_11
+      rect:
+        serializedVersion: 2
+        x: 1536
+        y: 1537.6667
+        width: 512
+        height: 512.3333
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 53c81643370fb45278234e2abed6e52b
+      internalID: 1528525138
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: TheManInTheCoat_12
+      rect:
+        serializedVersion: 2
+        x: 0
+        y: 1025.6667
+        width: 512
+        height: 512.3333
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 1013a060c1896418ea78123dd7e74354
+      internalID: -970172118
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: TheManInTheCoat_13
+      rect:
+        serializedVersion: 2
+        x: 512
+        y: 1025.6667
+        width: 512
+        height: 512.3333
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: ab3ce201f8c3547c1bf941bad0556e58
+      internalID: 1490537157
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: TheManInTheCoat_14
+      rect:
+        serializedVersion: 2
+        x: 1024
+        y: 1025.6667
+        width: 512
+        height: 512.3333
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 02fd6db6766f74d79a2059ca4214d8e7
+      internalID: 1126946990
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: TheManInTheCoat_15
+      rect:
+        serializedVersion: 2
+        x: 1536
+        y: 1025.6667
+        width: 512
+        height: 512.3333
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 5c1804f6259484595a72468ee340fabd
+      internalID: -2124818604
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: TheManInTheCoat_16
+      rect:
+        serializedVersion: 2
+        x: 0
+        y: 513.6667
+        width: 512
+        height: 512.3333
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 8dc4fa3fe234e49e3a00aa5f990a0582
+      internalID: -576929472
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: TheManInTheCoat_17
+      rect:
+        serializedVersion: 2
+        x: 512
+        y: 513.6667
+        width: 512
+        height: 512.3333
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 8b639b11a34774c618f1a04470b9b1cc
+      internalID: -1706212168
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: TheManInTheCoat_18
+      rect:
+        serializedVersion: 2
+        x: 1024
+        y: 513.6667
+        width: 512
+        height: 512.3333
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 1fa95632bc9604b8cb95a19987a51410
+      internalID: -1439273694
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: TheManInTheCoat_19
+      rect:
+        serializedVersion: 2
+        x: 1536
+        y: 513.6667
+        width: 512
+        height: 512.3333
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 2338a205f52d34f73a8a7a5e8fda4ac8
+      internalID: 1588193970
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: TheManInTheCoat_20
+      rect:
+        serializedVersion: 2
+        x: 0
+        y: 1.666687
+        width: 512
+        height: 512.3333
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 661b25ce0a8cb4bf4bbdea09a7bd5fdf
+      internalID: 1913334496
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: TheManInTheCoat_21
+      rect:
+        serializedVersion: 2
+        x: 512
+        y: 1.666687
+        width: 512
+        height: 512.3333
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 5eef5923d0cff47d7adc6c1903c4c08c
+      internalID: -457145233
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: TheManInTheCoat_22
+      rect:
+        serializedVersion: 2
+        x: 1024
+        y: 1.666687
+        width: 512
+        height: 512.3333
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 0a228e070e0814d2d9610954aff8b20a
+      internalID: 602537667
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: TheManInTheCoat_23
+      rect:
+        serializedVersion: 2
+        x: 1536
+        y: 1.666687
+        width: 512
+        height: 512.3333
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 501dcd826db51449c86e0919eddd49e8
+      internalID: 487240101
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    outline: []
+    physicsShape: []
+    bones: []
+    spriteID: 5e97eb03825dee720800000000000000
+    internalID: 0
+    vertices: []
+    indices: 
+    edges: []
+    weights: []
+    secondaryTextures: []
+    nameFileIdTable:
+      TheManInTheCoat_0: -1687703949
+      TheManInTheCoat_1: 680913131
+      TheManInTheCoat_10: 1666839708
+      TheManInTheCoat_11: 1528525138
+      TheManInTheCoat_12: -970172118
+      TheManInTheCoat_13: 1490537157
+      TheManInTheCoat_14: 1126946990
+      TheManInTheCoat_15: -2124818604
+      TheManInTheCoat_16: -576929472
+      TheManInTheCoat_17: -1706212168
+      TheManInTheCoat_18: -1439273694
+      TheManInTheCoat_19: 1588193970
+      TheManInTheCoat_2: -2082756512
+      TheManInTheCoat_20: 1913334496
+      TheManInTheCoat_21: -457145233
+      TheManInTheCoat_22: 602537667
+      TheManInTheCoat_23: 487240101
+      TheManInTheCoat_3: 269074245
+      TheManInTheCoat_4: 1705739247
+      TheManInTheCoat_5: 962339231
+      TheManInTheCoat_6: -272503254
+      TheManInTheCoat_7: 1213735132
+      TheManInTheCoat_8: 240614098
+      TheManInTheCoat_9: -1506930501
+  mipmapLimitGroupName: 
+  pSDRemoveMatte: 0
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
