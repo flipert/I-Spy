@@ -1,6 +1,7 @@
 using UnityEngine;
+using Unity.Netcode;
 
-public class PlayerController : MonoBehaviour
+public class PlayerController : NetworkBehaviour
 {
     [Header("Movement Settings")]
     public float moveSpeed = 5f;
@@ -13,13 +14,25 @@ public class PlayerController : MonoBehaviour
     public float minStaminaToSprint = 20f;  // Minimum stamina needed to START sprinting again
     public RectTransform staminaBarFill;    // Assign your StaminaBar (the white fill) here
 
+    // Network variables to sync across clients
+    private NetworkVariable<Vector3> networkPosition = new NetworkVariable<Vector3>();
+    private NetworkVariable<bool> networkIsRunning = new NetworkVariable<bool>(false);
+    private NetworkVariable<bool> networkIsFacingLeft = new NetworkVariable<bool>(false);
+
     private float currentStamina;
     private bool canSprint = true;          // Track if player can start sprinting
     private Animator animator;
     private SpriteRenderer characterSprite;
+    private bool isLocalPlayer;
+    private bool isMoving = false;
+    private bool isFacingLeft = false;
+    private bool isRunning = false;
 
     void Start()
     {
+        // Check if this is the local player
+        isLocalPlayer = IsOwner;
+        
         // Initialize stamina
         currentStamina = maxStamina;
         canSprint = true;
@@ -40,72 +53,119 @@ public class PlayerController : MonoBehaviour
 
         // Make sure stamina bar is full at start
         UpdateStaminaBar();
+        
+        // Debug log for network ownership
+        Debug.Log($"Player initialized. IsOwner: {IsOwner}, NetworkObjectId: {NetworkObjectId}");
     }
 
     void Update()
     {
-        float moveX = Input.GetAxisRaw("Horizontal");
-        float moveZ = Input.GetAxisRaw("Vertical");
-
-        // For top-down movement on XZ plane
-        Vector3 movement = new Vector3(moveX, 0f, moveZ).normalized;
-
-        // Check if we've regenerated enough stamina to sprint again
-        if (!canSprint && currentStamina >= minStaminaToSprint)
+        // Only process input for the local player
+        if (IsOwner)
         {
-            canSprint = true;
-        }
+            // Get input
+            float moveX = Input.GetAxisRaw("Horizontal");
+            float moveZ = Input.GetAxisRaw("Vertical");
 
-        // Decide if sprinting: 
-        // 1. Player is holding shift
-        // 2. Player is moving
-        // 3. Either we're already sprinting (stamina > 0) OR we have enough stamina to start sprinting
-        bool isSprinting = Input.GetKey(KeyCode.LeftShift) && 
-                          movement.magnitude > 0.01f && 
-                          (currentStamina > 0 && canSprint);
+            // Determine if we're moving
+            isMoving = (moveX != 0 || moveZ != 0);
 
-        // Adjust speed
-        float currentSpeed = moveSpeed;
-        if (isSprinting)
-        {
-            currentSpeed *= runMultiplier;
-            // Deplete stamina
-            currentStamina -= staminaDepletionRate * Time.deltaTime;
-            if (currentStamina <= 0f)
+            // Determine if we're running (holding Shift and have enough stamina)
+            bool wantsToRun = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+            
+            // Can only start sprinting if we have enough stamina
+            if (wantsToRun && currentStamina < minStaminaToSprint)
             {
-                currentStamina = 0f;
-                canSprint = false; // Disable sprinting until we reach the threshold again
+                wantsToRun = false;
+                canSprint = false;
             }
+            
+            // If we have enough stamina again, allow sprinting
+            if (!canSprint && currentStamina >= minStaminaToSprint)
+            {
+                canSprint = true;
+            }
+            
+            // Only run if we're moving, want to run, and can sprint
+            isRunning = isMoving && wantsToRun && canSprint;
+
+            // Calculate movement speed
+            float currentSpeed = moveSpeed;
+            if (isRunning)
+            {
+                currentSpeed *= runMultiplier;
+                // Deplete stamina while running
+                currentStamina = Mathf.Max(0, currentStamina - (staminaDepletionRate * Time.deltaTime));
+                if (currentStamina <= 0)
+                {
+                    canSprint = false;
+                }
+            }
+            else if (!isMoving || !wantsToRun)
+            {
+                // Regenerate stamina when not running
+                currentStamina = Mathf.Min(maxStamina, currentStamina + (staminaRegenRate * Time.deltaTime));
+            }
+
+            // Create movement vector using X and Z axes (keeping Y the same)
+            Vector3 movement = new Vector3(moveX, 0, moveZ).normalized;
+            
+            // Apply movement
+            transform.position += movement * currentSpeed * Time.deltaTime;
+
+            // Update animator if we have one
+            if (animator != null)
+            {
+                animator.SetBool("Running", isMoving);
+            }
+
+            // Update sprite direction if we have a sprite renderer
+            if (characterSprite != null && moveX != 0)
+            {
+                isFacingLeft = (moveX < 0);
+                characterSprite.flipX = isFacingLeft;
+            }
+
+            // Update network variables to sync with other clients
+            if (IsServer)
+            {
+                networkPosition.Value = transform.position;
+                networkIsRunning.Value = isMoving;
+                networkIsFacingLeft.Value = isFacingLeft;
+            }
+            else
+            {
+                UpdatePositionServerRpc(transform.position, isMoving, isFacingLeft);
+            }
+
+            // Finally, update the stamina bar fill
+            UpdateStaminaBar();
         }
         else
         {
-            // Replenish stamina
-            currentStamina += staminaRegenRate * Time.deltaTime;
-            if (currentStamina > maxStamina)
-                currentStamina = maxStamina;
+            // For non-local players, update position and animation based on network variables
+            transform.position = Vector3.Lerp(transform.position, networkPosition.Value, Time.deltaTime * 10f);
+            
+            // Update animator
+            if (animator != null)
+            {
+                animator.SetBool("Running", networkIsRunning.Value);
+            }
+            
+            // Update sprite direction
+            if (characterSprite != null)
+            {
+                characterSprite.flipX = networkIsFacingLeft.Value;
+            }
         }
+    }
 
-        // Move the player
-        transform.position += movement * currentSpeed * Time.deltaTime;
-
-        // Update animator
-        if (animator != null)
-        {
-            bool isMoving = movement.magnitude > 0.01f;
-            animator.SetBool("Running", isMoving);
-
-            // Slightly faster animator speed when sprinting
-            animator.speed = (isMoving && isSprinting) ? 1.5f : 1f;
-        }
-
-        // Flip sprite based on horizontal input
-        if (characterSprite != null && moveX != 0)
-        {
-            characterSprite.flipX = (moveX < 0);
-        }
-
-        // Finally, update the stamina bar fill
-        UpdateStaminaBar();
+    [ServerRpc]
+    private void UpdatePositionServerRpc(Vector3 position, bool isRunning, bool isFacingLeft)
+    {
+        networkPosition.Value = position;
+        networkIsRunning.Value = isRunning;
+        networkIsFacingLeft.Value = isFacingLeft;
     }
 
     /// <summary>
@@ -125,5 +185,35 @@ public class PlayerController : MonoBehaviour
     public void SetMinStaminaToSprint(float value)
     {
         minStaminaToSprint = value;
+    }
+
+    public override void OnNetworkSpawn()
+    {
+        base.OnNetworkSpawn();
+        
+        // If this is the local player, find the camera and assign ourselves as the target
+        if (IsOwner)
+        {
+            Debug.Log($"PlayerController: Local player spawned at {transform.position}");
+            
+            // Find the main camera and set its target to this player
+            CameraFollow cameraFollow = Camera.main?.GetComponent<CameraFollow>();
+            if (cameraFollow != null)
+            {
+                Debug.Log("PlayerController: Found CameraFollow, setting target");
+                cameraFollow.SetTarget(transform);
+                cameraFollow.ResetCameraPosition();
+            }
+            else
+            {
+                Debug.LogWarning("PlayerController: Could not find CameraFollow component on main camera");
+            }
+        }
+        
+        // Initialize network variables
+        if (IsServer)
+        {
+            networkPosition.Value = transform.position;
+        }
     }
 }

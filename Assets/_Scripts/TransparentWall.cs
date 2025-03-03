@@ -1,4 +1,5 @@
 using UnityEngine;
+using System.Collections;
 
 [RequireComponent(typeof(Renderer))]
 public class TransparentWall : MonoBehaviour
@@ -22,6 +23,9 @@ public class TransparentWall : MonoBehaviour
     [Tooltip("Additional detection radius around the player")]
     public float detectionRadius = 0.5f;
 
+    [Tooltip("If true, will automatically find the local player")]
+    public bool autoFindLocalPlayer = true;
+
     // Private variables
     private Renderer wallRenderer;
     private Material wallMaterial;
@@ -44,19 +48,34 @@ public class TransparentWall : MonoBehaviour
         // Make sure the shader supports transparency
         SetupMaterialForTransparency();
         
-        // If no player is set, try to find it
+        // If no player is set and auto-find is enabled, try to find the local player
+        if (player == null && autoFindLocalPlayer)
+        {
+            StartCoroutine(FindLocalPlayerDelayed());
+        }
+    }
+
+    private IEnumerator FindLocalPlayerDelayed()
+    {
+        // Wait a bit longer to ensure network players are spawned
+        yield return new WaitForSeconds(0.5f);
+        
+        // Find all player controllers
+        var players = GameObject.FindObjectsOfType<PlayerController>();
+        foreach (var playerController in players)
+        {
+            // Check if this is the local player
+            if (playerController.IsOwner)
+            {
+                player = playerController.transform;
+                Debug.Log("TransparentWall: Automatically found local player");
+                break;
+            }
+        }
+        
         if (player == null)
         {
-            GameObject playerObj = GameObject.FindGameObjectWithTag("Player");
-            if (playerObj != null)
-            {
-                player = playerObj.transform;
-                Debug.Log("TransparentWall: Automatically found player");
-            }
-            else
-            {
-                Debug.LogWarning("TransparentWall: No player assigned and no Player tag found");
-            }
+            Debug.LogWarning("TransparentWall: Could not find local player");
         }
     }
 

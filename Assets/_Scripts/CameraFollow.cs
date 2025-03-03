@@ -1,4 +1,6 @@
 using UnityEngine;
+using System.Collections;
+using Unity.Netcode;
 
 public class CameraFollow : MonoBehaviour
 {
@@ -48,27 +50,92 @@ public class CameraFollow : MonoBehaviour
         FixedOffset        // Camera maintains exact offset from target
     }
     
+    private bool isSearchingForPlayer = false;
+    private int retryCount = 0;
+    private float retryInterval = 0.5f;
+    private int maxRetries = 5;
+    
     private void Start()
     {
-        // If no target is set, try to find the player
+        Debug.Log("CameraFollow: Start");
+        
+        // If no target is set, try to find the local player
         if (target == null)
         {
-            GameObject player = GameObject.FindGameObjectWithTag("Player");
-            if (player != null)
-            {
-                target = player.transform;
-                Debug.Log("CameraFollow: Automatically found player target");
-            }
-            else
-            {
-                Debug.LogWarning("CameraFollow: No target assigned and no Player tag found");
-            }
+            // Start looking for the player with retries
+            StartCoroutine(FindLocalPlayerWithRetry());
         }
         
         // Initialize camera position
         if (target != null && followStyle == FollowStyle.Instant)
         {
             UpdateCameraPosition(1f);
+        }
+    }
+    
+    private IEnumerator FindLocalPlayerWithRetry()
+    {
+        if (isSearchingForPlayer)
+            yield break;
+            
+        isSearchingForPlayer = true;
+        retryCount = 0;
+        
+        Debug.Log("CameraFollow: Starting to look for local player");
+        
+        // Wait for NetworkManager to be ready
+        while (NetworkManager.Singleton == null || !NetworkManager.Singleton.IsListening)
+        {
+            Debug.Log("CameraFollow: Waiting for NetworkManager to be ready...");
+            yield return new WaitForSeconds(0.5f);
+        }
+        
+        // Wait a bit longer to ensure players are spawned
+        yield return new WaitForSeconds(1.0f);
+        
+        while (target == null && retryCount < maxRetries)
+        {
+            yield return new WaitForSeconds(retryInterval);
+            FindLocalPlayer();
+            retryCount++;
+            Debug.Log($"CameraFollow: Looking for player, attempt {retryCount}/{maxRetries}");
+        }
+        
+        if (target == null)
+        {
+            Debug.LogWarning("CameraFollow: Failed to find local player after multiple attempts");
+        }
+        else
+        {
+            Debug.Log($"CameraFollow: Successfully found local player at {target.position}");
+            // Initialize camera position immediately when we find the player
+            ResetCameraPosition();
+        }
+        
+        isSearchingForPlayer = false;
+    }
+    
+    private void FindLocalPlayer()
+    {
+        // Find the local player
+        var players = GameObject.FindObjectsOfType<PlayerController>();
+        Debug.Log($"CameraFollow: Found {players.Length} PlayerController instances");
+        
+        foreach (var player in players)
+        {
+            Debug.Log($"CameraFollow: Checking player {player.name}, IsOwner: {player.IsOwner}");
+            if (player.IsOwner)
+            {
+                target = player.transform;
+                Debug.Log($"CameraFollow: Found local player at position {target.position}");
+                
+                // Initialize camera position immediately when we find the player
+                if (followStyle == FollowStyle.Instant)
+                {
+                    UpdateCameraPosition(1f);
+                }
+                break;
+            }
         }
     }
     

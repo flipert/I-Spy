@@ -832,7 +832,13 @@ PlayerSettings:
   XboxOneOverrideIdentityPublisher: 
   vrEditorSettings: {}
   cloudServicesEnabled:
+    Build: 0
+    Game Performance: 0
+    Legacy Analytics: 0
+    Purchasing: 0
+    UDP: 0
     UNet: 1
+    Unity Ads: 0
   luminIcon:
     m_Name: 
     m_ModelFolderPath: 
@@ -852,11 +858,11 @@ PlayerSettings:
   apiCompatibilityLevel: 6
   activeInputHandler: 0
   windowsGamepadBackendHint: 0
-  cloudProjectId: f171f953-5a96-4f0a-8615-78f619d77bd4
+  cloudProjectId: 08ef50f0-f83c-4bdf-bcb0-55a6373595ad
   framebufferDepthMemorylessMode: 0
   qualitySettingsNames: []
-  projectName: I, Spy
-  organizationId: unity_sroyigvl47osqw
+  projectName: I, Spy (1)
+  organizationId: pablo-4306965
   cloudEnabled: 0
   legacyClampBlendShapeWeights: 0
   hmiLoadingImage: {fileID: 0}
