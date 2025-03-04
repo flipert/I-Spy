@@ -2944,7 +2944,7 @@ MonoBehaviour:
   m_MaxPacketQueueSize: 128
   m_MaxPayloadSize: 6144
   m_HeartbeatTimeoutMS: 500
-  m_ConnectTimeoutMS: 1000
+  m_ConnectTimeoutMS: 10000
   m_MaxConnectAttempts: 60
   m_DisconnectTimeoutMS: 30000
   ConnectionData:
@@ -2970,7 +2970,7 @@ MonoBehaviour:
   NetworkConfig:
     ProtocolVersion: 0
     NetworkTransport: {fileID: 1266477718}
-    PlayerPrefab: {fileID: 0}
+    PlayerPrefab: {fileID: 5964388756769884995, guid: 8323979c5d37e47d9867e3d8461d53c8, type: 3}
     Prefabs:
       NetworkPrefabsLists:
       - {fileID: 11400000, guid: 223e8e5d5b1e74227b82e7535c4348a1, type: 2}
