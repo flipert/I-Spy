@@ -26,7 +26,7 @@ Transform:
   m_GameObject: {fileID: 3025003065130630388}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0.034, y: -0.411, z: 0}
+  m_LocalPosition: {x: 0, y: -0.415, z: 0}
   m_LocalScale: {x: 2.9066217, y: 0.3846, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -95,11 +95,11 @@ GameObject:
   - component: {fileID: 657204650503495020}
   - component: {fileID: 3879874863887253514}
   - component: {fileID: 923334018254615283}
-  - component: {fileID: 2735814200006622442}
   - component: {fileID: 2109716159598790390}
+  - component: {fileID: 1445705022477998449}
   m_Layer: 0
-  m_Name: Player
-  m_TagString: Player
+  m_Name: NPC
+  m_TagString: NPC
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -117,8 +117,8 @@ Transform:
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
-  - {fileID: 1163819008692052922}
   - {fileID: 3038671074602219463}
+  - {fileID: 1163819008692052922}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!95 &3879874863887253514
@@ -154,8 +154,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d5a57f767e5e46a458fc5d3c628d0cbb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  GlobalObjectIdHash: 2294059672
-  InScenePlacedSourceGlobalObjectIdHash: 0
+  GlobalObjectIdHash: 1262217158
+  InScenePlacedSourceGlobalObjectIdHash: 1523463287
   AlwaysReplicateAsRoot: 0
   SynchronizeTransform: 1
   ActiveSceneSynchronization: 0
@@ -163,25 +163,6 @@ MonoBehaviour:
   SpawnWithObservers: 1
   DontDestroyWithOwner: 0
   AutoObjectParentSync: 1
---- !u!114 &2735814200006622442
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 5964388756769884995}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 812867578fdd74b43a8498aa93fe0a02, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  moveSpeed: 2
-  runMultiplier: 2
-  maxStamina: 10
-  staminaDepletionRate: 3
-  staminaRegenRate: 2
-  minStaminaToSprint: 4
-  staminaBarFill: {fileID: 0}
 --- !u!136 &2109716159598790390
 CapsuleCollider:
   m_ObjectHideFlags: 0
@@ -197,7 +178,7 @@ CapsuleCollider:
     serializedVersion: 2
     m_Bits: 0
   m_LayerOverridePriority: 0
-  m_IsTrigger: 0
+  m_IsTrigger: 1
   m_ProvidesContacts: 0
   m_Enabled: 1
   serializedVersion: 2
@@ -205,6 +186,38 @@ CapsuleCollider:
   m_Height: 1
   m_Direction: 1
   m_Center: {x: 0, y: 0, z: 0}
+--- !u!114 &1445705022477998449
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5964388756769884995}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 45f049b7bce8f4dc588f0f65e6bc8589, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  allowedAreaCenter: {x: 0, y: 0, z: 0.35}
+  allowedAreaSize: {x: 21.28, y: 0, z: 13.39}
+  forbiddenAreaObjects: []
+  walkSpeed: 1
+  rotationSpeed: 0
+  destinationTolerance: 0.2
+  inGroup: 0
+  groupRadius: 1
+  minGroupTime: 10
+  maxGroupTime: 25
+  minGroupSize: 3
+  maxGroupSize: 5
+  tintColors:
+  - {r: 1, g: 0.11792451, b: 0.11792451, a: 1}
+  - {r: 0.51808506, g: 1, b: 0.11764705, a: 1}
+  - {r: 1, g: 0.873364, b: 0.11764705, a: 1}
+  - {r: 0.11764705, g: 0.6450505, b: 1, a: 1}
+  - {r: 0.79766256, g: 0.11764705, b: 1, a: 1}
+  - {r: 0, g: 0, b: 0, a: 1}
+  npcAnimator: {fileID: 3879874863887253514}
 --- !u!1 &8024665826702159164
 GameObject:
   m_ObjectHideFlags: 0
@@ -279,7 +292,7 @@ SpriteRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 0
   m_Sprite: {fileID: -1506930501, guid: 40a48dc43bb484ab8b1d728e02ed11eb, type: 3}
-  m_Color: {r: 0, g: 0, b: 0, a: 1}
+  m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_FlipX: 0
   m_FlipY: 0
   m_DrawMode: 0

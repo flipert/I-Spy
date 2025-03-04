@@ -62,9 +62,20 @@ public class CameraFollow : MonoBehaviour
         // If no target is set, try to find the local player
         if (target == null)
         {
-            // Start looking for the player with retries
-            StartCoroutine(FindLocalPlayerWithRetry());
+            GameObject playerObj = GameObject.FindGameObjectWithTag("Player");
+            if(playerObj != null)
+            {
+                target = playerObj.transform;
+                Debug.Log("CameraFollow: No target assigned. Found Player as target: " + target.name);
+            }
+            else
+            {
+                Debug.LogWarning("CameraFollow: No target assigned and no GameObject with tag 'Player' found.");
+            }
         }
+        
+        // Start looking for the player with retries
+        StartCoroutine(FindLocalPlayerWithRetry());
         
         // Initialize camera position
         if (target != null && followStyle == FollowStyle.Instant)
@@ -139,22 +150,32 @@ public class CameraFollow : MonoBehaviour
         }
     }
     
-    private void LateUpdate()
+    private void Update()
     {
-        if (target == null)
-            return;
-        
-        // Update camera position based on selected follow style
+        // Ensure the camera follows the player: if target is null or not tagged as 'Player', reassign it
+        if (target == null || !target.gameObject.CompareTag("Player"))
+        {
+            GameObject playerObj = GameObject.FindGameObjectWithTag("Player");
+            if (playerObj != null)
+            {
+                target = playerObj.transform;
+                Debug.Log("CameraFollow: Updated target to Player: " + target.name);
+            }
+            else
+            {
+                Debug.LogWarning("CameraFollow: No GameObject with tag 'Player' found in Update.");
+            }
+        }
+
+        // Continue with camera movement logic
         switch (followStyle)
         {
             case FollowStyle.Instant:
                 UpdateCameraPosition(1f);
                 break;
-                
             case FollowStyle.SmoothFollow:
                 UpdateCameraPosition(smoothSpeed);
                 break;
-                
             case FollowStyle.SmoothDamp:
                 Vector3 targetPosition = GetTargetPosition();
                 transform.position = Vector3.SmoothDamp(
@@ -163,12 +184,11 @@ public class CameraFollow : MonoBehaviour
                     ref currentVelocity, 
                     positionDamping);
                 break;
-                
             case FollowStyle.FixedOffset:
                 transform.position = target.position + offset;
                 break;
         }
-        
+
         // Make the camera look at the target if enabled
         if (lookAtTarget)
         {
@@ -248,4 +268,4 @@ public class CameraFollow : MonoBehaviour
         Gizmos.color = Color.blue;
         Gizmos.DrawWireSphere(GetTargetPosition(), 0.5f);
     }
-} 
+}

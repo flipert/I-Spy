@@ -5,8 +5,8 @@ TagManager:
   serializedVersion: 2
   tags:
   - Building
-  - Wall
-  - Door
+  - Boundary
+  - NPC
   layers:
   - Default
   - TransparentFX
