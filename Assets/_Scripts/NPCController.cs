@@ -28,7 +28,7 @@ public class NPCController : NetworkBehaviour
     [Tooltip("Radius to check for nearby NPCs for grouping")]
     public float groupRadius = 3f;
     [Tooltip("Minimum time (in seconds) an NPC stays in a group")]
-    public float minGroupTime = 10f;
+    public float minGroupTime = 15f;
     [Tooltip("Maximum time (in seconds) an NPC stays in a group")]
     public float maxGroupTime = 30f;
     [Tooltip("Minimum number of NPCs (including this one) required to form a group")]
@@ -357,6 +357,32 @@ public class NPCController : NetworkBehaviour
             } else {
                 transform.position = formationTargetPos;
                 npcAnimator.SetBool("Running", false);
+                
+                // When in position, face toward the center of the circle
+                Collider[] colliders = Physics.OverlapSphere(transform.position, groupRadius * 2f);
+                List<NPCController> groupMembers = new List<NPCController>();
+                foreach (Collider col in colliders)
+                {
+                    NPCController npc = col.GetComponent<NPCController>();
+                    if(npc != null && npc.inGroup)
+                    {
+                        groupMembers.Add(npc);
+                    }
+                }
+                
+                if(groupMembers.Count > 0) {
+                    // Calculate group center
+                    Vector3 groupCenter = Vector3.zero;
+                    foreach(var member in groupMembers){ groupCenter += member.transform.position; }
+                    groupCenter /= groupMembers.Count;
+                    
+                    // Face toward center
+                    Vector3 directionToCenter = (groupCenter - transform.position).normalized;
+                    SpriteRenderer spriteR = npcRenderer as SpriteRenderer;
+                    if(spriteR != null && Mathf.Abs(directionToCenter.x) > 0.01f) {
+                        spriteR.flipX = (directionToCenter.x < 0);
+                    }
+                }
             }
         }
 

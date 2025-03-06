@@ -1220,7 +1220,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f4020faa3e60246ecafa349db99a8652, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  playerPrefab: {fileID: 5964388756769884995, guid: 8323979c5d37e47d9867e3d8461d53c8, type: 3}
+  playerPrefab: {fileID: 5964388756769884995, guid: 821cb086e733f4acf97ea6b1444473cf, type: 3}
   spawnPoints:
   - {fileID: 773178457}
   - {fileID: 400973250}
@@ -4352,10 +4352,17 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 92100e6ab4f784c1da93bf60c7a324fc, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  npcPrefab: {fileID: 5964388756769884995, guid: b9ee9f2a37fbd4d6887071452b1beedf, type: 3}
-  maxNPCCount: 50
+  npcPrefabs:
+  - {fileID: 5964388756769884995, guid: 62f65b684cf684c3783a308e8214fd27, type: 3}
+  - {fileID: 5964388756769884995, guid: b9ee9f2a37fbd4d6887071452b1beedf, type: 3}
+  maxNPCCount: 150
   spawnAreaCenter: {x: 0, y: 0, z: 0}
   spawnAreaSize: {x: 20, y: 0, z: 20}
+  walkerPercentageGlobal: 15
+  groupingPercentageGlobal: 35
+  idlerPercentageGlobal: 50
+  idlerMinIdleTime: 5
+  idlerMaxIdleTime: 15
 --- !u!4 &1906011819
 Transform:
   m_ObjectHideFlags: 0
