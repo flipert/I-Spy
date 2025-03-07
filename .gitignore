@@ -1,1 +1,6 @@
 Library/
+/[Ll]ogs/
+/[Tt]emp/
+/[Uu]serSettings/
+*.csproj
+*.sln
