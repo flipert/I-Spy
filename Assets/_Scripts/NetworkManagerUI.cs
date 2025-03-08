@@ -78,9 +78,12 @@ public class NetworkManagerUI : MonoBehaviour
         {
             DontDestroyOnLoad(NetworkManager.Singleton.gameObject);
             
-            // Configure NetworkManager for scene management
-            // Disable auto-spawn for now - PlayerSpawner will handle it
+            // Configure NetworkManager to prevent auto-spawning players
             NetworkManager.Singleton.NetworkConfig.PlayerPrefab = null;
+            
+            // Enable connection approval to control when players can join
+            NetworkManager.Singleton.ConnectionApprovalCallback += ApproveConnection;
+            NetworkManager.Singleton.NetworkConfig.ConnectionApproval = true;
         }
         
         // Set up button listeners
@@ -197,6 +200,7 @@ public class NetworkManagerUI : MonoBehaviour
             NetworkManager.Singleton.OnClientConnectedCallback -= OnClientConnected;
             NetworkManager.Singleton.OnClientDisconnectCallback -= OnClientDisconnected;
             NetworkManager.Singleton.OnServerStarted -= OnServerStarted;
+            NetworkManager.Singleton.ConnectionApprovalCallback -= ApproveConnection;
         }
     }
     
@@ -206,7 +210,14 @@ public class NetworkManagerUI : MonoBehaviour
         if (NetworkManager.Singleton != null)
         {
             // We'll use SceneManagement to handle player spawning after scene load
+            Debug.Log("Starting host - NO player spawning until Game scene loads");
+            
+            // Double-check that player spawning is disabled
+            NetworkManager.Singleton.NetworkConfig.PlayerPrefab = null;
+            NetworkManager.Singleton.NetworkConfig.ConnectionApproval = true;
+            
             NetworkManager.Singleton.StartHost();
+            
             // Fade out the UI
             StartCoroutine(FadeOutUI());
             
@@ -219,7 +230,9 @@ public class NetworkManagerUI : MonoBehaviour
     {
         if (NetworkManager.Singleton == null) return;
         
-        // We'll use SceneManagement to handle player spawning after scene load
+        // Make absolutely sure we don't spawn a player in main menu
+        NetworkManager.Singleton.NetworkConfig.PlayerPrefab = null;
+        NetworkManager.Singleton.NetworkConfig.ConnectionApproval = true;
         
         // Get IP from input field
         string ipAddress = ipInputField != null ? ipInputField.text : defaultIP;
@@ -233,6 +246,7 @@ public class NetworkManagerUI : MonoBehaviour
         NetworkManager.Singleton.GetComponent<Unity.Netcode.Transports.UTP.UnityTransport>().ConnectionData.Port = defaultPort;
         
         // Start as client
+        Debug.Log("Starting client - NO player spawning until Game scene loads");
         NetworkManager.Singleton.StartClient();
         UpdateStatusText("Connecting to " + ipAddress + "...");
         
@@ -410,5 +424,16 @@ public class NetworkManagerUI : MonoBehaviour
     {
         string localIP = GetLocalIPAddress();
         UpdateStatusText("Your IP: " + localIP);
+    }
+    
+    // Connection approval callback - this controls when players can join
+    private void ApproveConnection(NetworkManager.ConnectionApprovalRequest request, NetworkManager.ConnectionApprovalResponse response)
+    {
+        // Always approve the connection
+        response.Approved = true;
+        response.CreatePlayerObject = false; // Don't create player object automatically
+        response.Position = Vector3.zero;
+        response.Rotation = Quaternion.identity;
+        response.Pending = false;
     }
 } 

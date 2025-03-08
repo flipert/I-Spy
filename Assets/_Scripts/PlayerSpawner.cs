@@ -42,8 +42,10 @@ public class PlayerSpawner : MonoBehaviour
             NetworkManager.Singleton.OnServerStarted += OnServerStarted;
         }
         
-        // Determine if we're in the game scene
+        // Determine if we're in the game scene - but don't spawn players yet
+        // We'll wait for the scene load event
         isGameScene = SceneManager.GetActiveScene().name == "Game"; // Update this with your game scene name
+        Debug.Log($"PlayerSpawner: Start() - Current scene is {SceneManager.GetActiveScene().name}, isGameScene = {isGameScene}");
     }
     
     private void OnDestroy()
@@ -59,12 +61,16 @@ public class PlayerSpawner : MonoBehaviour
     
     private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
     {
+        Debug.Log($"PlayerSpawner: Scene loaded - {scene.name}");
+        
         // Update scene state
+        bool wasGameScene = isGameScene;
         isGameScene = scene.name == "Game"; // Update this with your game scene name
         
-        if (isGameScene && (NetworkManager.Singleton.IsServer || NetworkManager.Singleton.IsHost))
+        // Only spawn players if we've just entered the Game scene
+        if (isGameScene && !wasGameScene && (NetworkManager.Singleton.IsServer || NetworkManager.Singleton.IsHost))
         {
-            Debug.Log("PlayerSpawner: Game scene loaded, spawning players");
+            Debug.Log("PlayerSpawner: Game scene loaded, spawning players after delay");
             // Delay spawning slightly to ensure everything is ready
             StartCoroutine(SpawnPlayersDelayed());
         }
@@ -108,9 +114,10 @@ public class PlayerSpawner : MonoBehaviour
     
     private void SpawnPlayerForClient(ulong clientId)
     {
-        if (!isGameScene)
+        // Triple-check we're in the game scene
+        if (!isGameScene || SceneManager.GetActiveScene().name != "Game") // Update this with your game scene name
         {
-            Debug.Log("PlayerSpawner: Not in game scene, skipping player spawn");
+            Debug.Log($"PlayerSpawner: Not in game scene, skipping player spawn for client {clientId}");
             return;
         }
         
