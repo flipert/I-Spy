@@ -6,7 +6,7 @@ using UnityEngine.SceneManagement;
 
 public class PlayerSpawner : MonoBehaviour
 {
-    [SerializeField] private GameObject playerPrefab;
+    [SerializeField] private GameObject fallbackPlayerPrefab; // Fallback prefab if no selection
     [SerializeField] private Transform[] spawnPoints;
     
     // Singleton instance
@@ -124,10 +124,26 @@ public class PlayerSpawner : MonoBehaviour
         Vector3 spawnPosition = spawnPoint != null ? spawnPoint.position : Vector3.zero;
         Quaternion spawnRotation = spawnPoint != null ? spawnPoint.rotation : Quaternion.identity;
         
-        Debug.Log($"PlayerSpawner: Spawning player for client {clientId} at {spawnPosition}");
+        // Get the selected character prefab from NetworkManagerUI
+        GameObject characterPrefab = NetworkManagerUI.SelectedCharacterPrefab;
+        
+        // Fallback to default prefab if no selection
+        if (characterPrefab == null)
+        {
+            Debug.LogWarning("PlayerSpawner: No character prefab selected, using fallback");
+            characterPrefab = fallbackPlayerPrefab;
+            
+            if (characterPrefab == null)
+            {
+                Debug.LogError("PlayerSpawner: No fallback player prefab assigned!");
+                return;
+            }
+        }
+        
+        Debug.Log($"PlayerSpawner: Spawning character '{characterPrefab.name}' for client {clientId} at {spawnPosition}");
         
         // Instantiate the player
-        GameObject playerObj = Instantiate(playerPrefab, spawnPosition, spawnRotation);
+        GameObject playerObj = Instantiate(characterPrefab, spawnPosition, spawnRotation);
         NetworkObject networkObject = playerObj.GetComponent<NetworkObject>();
         
         if (networkObject != null)

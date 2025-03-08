@@ -28,8 +28,25 @@ public class NetworkManagerUI : MonoBehaviour
     [SerializeField] private string gameSceneName = "Game";
     [SerializeField] private float sceneLoadDelay = 1.0f;
     
+    [Header("Character Selection")]
+    [SerializeField] private GameObject[] characterPrefabs;
+    [SerializeField] private Button[] characterSelectionButtons;
+    [SerializeField] private int defaultCharacterIndex = 0;
+    
     // Singleton pattern
     public static NetworkManagerUI Instance { get; private set; }
+    
+    // Track the selected character
+    private int selectedCharacterIndex;
+    
+    // Static getter to allow PlayerSpawner to access the selected character prefab
+    public static GameObject SelectedCharacterPrefab { get; private set; }
+    
+    // Add getter for character prefabs array for debugging and UI purposes
+    /// <summary>
+    /// Gets the available character prefabs.
+    /// </summary>
+    public GameObject[] CharacterPrefabs => characterPrefabs;
     
     private void Awake()
     {
@@ -44,6 +61,17 @@ public class NetworkManagerUI : MonoBehaviour
             Destroy(gameObject);
             return;
         }
+        
+        // Set the default character
+        selectedCharacterIndex = defaultCharacterIndex;
+        if (characterPrefabs != null && characterPrefabs.Length > 0 && 
+            selectedCharacterIndex >= 0 && selectedCharacterIndex < characterPrefabs.Length)
+        {
+            SelectedCharacterPrefab = characterPrefabs[selectedCharacterIndex];
+        }
+        
+        // Setup character selection buttons
+        SetupCharacterSelectionButtons();
         
         // Make sure the NetworkManager persists between scenes
         if (NetworkManager.Singleton != null)
@@ -89,6 +117,66 @@ public class NetworkManagerUI : MonoBehaviour
         }
     }
     
+    private void SetupCharacterSelectionButtons()
+    {
+        if (characterSelectionButtons == null || characterSelectionButtons.Length == 0)
+        {
+            Debug.LogWarning("No character selection buttons assigned!");
+            return;
+        }
+        
+        // Setup each character selection button
+        for (int i = 0; i < characterSelectionButtons.Length; i++)
+        {
+            if (characterSelectionButtons[i] != null)
+            {
+                int characterIndex = i; // Need to capture the index for the lambda
+                characterSelectionButtons[i].onClick.AddListener(() => SelectCharacter(characterIndex));
+            }
+        }
+    }
+    
+    /// <summary>
+    /// Selects a character prefab by index. This can be called by other UI elements like CharacterSelection.
+    /// </summary>
+    /// <param name="characterIndex">Index of the character in the characterPrefabs array</param>
+    public void SelectCharacter(int characterIndex)
+    {
+        if (characterPrefabs == null || characterPrefabs.Length == 0)
+        {
+            Debug.LogError("No character prefabs available for selection!");
+            return;
+        }
+        
+        // Ensure valid index
+        if (characterIndex >= 0 && characterIndex < characterPrefabs.Length)
+        {
+            selectedCharacterIndex = characterIndex;
+            SelectedCharacterPrefab = characterPrefabs[characterIndex];
+            Debug.Log($"Selected character: {SelectedCharacterPrefab.name}");
+            
+            // Highlight the selected button (optional)
+            UpdateCharacterSelectionUI();
+        }
+    }
+    
+    private void UpdateCharacterSelectionUI()
+    {
+        // Update visuals for character selection buttons
+        for (int i = 0; i < characterSelectionButtons.Length; i++)
+        {
+            if (characterSelectionButtons[i] != null)
+            {
+                // Highlight the selected button and unhighlight others
+                ColorBlock colors = characterSelectionButtons[i].colors;
+                colors.normalColor = (i == selectedCharacterIndex) 
+                    ? new Color(0.8f, 0.8f, 1f) // Light blue for selected
+                    : Color.white;
+                characterSelectionButtons[i].colors = colors;
+            }
+        }
+    }
+    
     private void Start()
     {
         // This UI should persist if we're in the main menu
@@ -96,6 +184,9 @@ public class NetworkManagerUI : MonoBehaviour
         {
             DontDestroyOnLoad(gameObject);
         }
+        
+        // Initialize character selection
+        SelectCharacter(selectedCharacterIndex);
     }
     
     private void OnDestroy()
