@@ -63,19 +63,20 @@ public class CameraFollow : MonoBehaviour
         if (target == null)
         {
             GameObject playerObj = GameObject.FindGameObjectWithTag("Player");
-            if(playerObj != null)
+            if (playerObj != null)
             {
                 target = playerObj.transform;
-                Debug.Log("CameraFollow: No target assigned. Found Player as target: " + target.name);
+                Debug.Log($"CameraFollow: Found player at {target.position}");
             }
             else
             {
-                Debug.LogWarning("CameraFollow: No target assigned and no GameObject with tag 'Player' found.");
+                Debug.Log("CameraFollow: No player found with tag 'Player', will try to find local player");
+                StartCoroutine(FindLocalPlayerWithRetryOld());
             }
         }
         
         // Start looking for the player with retries
-        StartCoroutine(FindLocalPlayerWithRetry());
+        FindLocalPlayerWithRetry();
         
         // Initialize camera position
         if (target != null && followStyle == FollowStyle.Instant)
@@ -84,7 +85,7 @@ public class CameraFollow : MonoBehaviour
         }
     }
     
-    private IEnumerator FindLocalPlayerWithRetry()
+    private IEnumerator FindLocalPlayerWithRetryOld()
     {
         if (isSearchingForPlayer)
             yield break;
@@ -128,26 +129,44 @@ public class CameraFollow : MonoBehaviour
     
     private void FindLocalPlayer()
     {
-        // Find the local player
+        Debug.Log("CameraFollow: Searching for local player...");
+        
+        // First try to find using PlayerController
         var players = GameObject.FindObjectsOfType<PlayerController>();
         Debug.Log($"CameraFollow: Found {players.Length} PlayerController instances");
         
         foreach (var player in players)
         {
-            Debug.Log($"CameraFollow: Checking player {player.name}, IsOwner: {player.IsOwner}");
             if (player.IsOwner)
             {
                 target = player.transform;
-                Debug.Log($"CameraFollow: Found local player at position {target.position}");
-                
-                // Initialize camera position immediately when we find the player
-                if (followStyle == FollowStyle.Instant)
-                {
-                    UpdateCameraPosition(1f);
-                }
-                break;
+                Debug.Log($"CameraFollow: Found local player via PlayerController at {target.position}");
+                return;
             }
         }
+        
+        // If no player found via PlayerController, try tag as fallback
+        GameObject taggedPlayer = GameObject.FindGameObjectWithTag("Player");
+        if (taggedPlayer != null)
+        {
+            // Verify it's our local player if it has a NetworkObject
+            NetworkObject netObj = taggedPlayer.GetComponent<NetworkObject>();
+            if (netObj != null && netObj.IsLocalPlayer)
+            {
+                target = taggedPlayer.transform;
+                Debug.Log($"CameraFollow: Found local player via tag at {target.position}");
+                return;
+            }
+            else if (netObj == null)
+            {
+                // If there's no NetworkObject, assume it's our player (single player mode)
+                target = taggedPlayer.transform;
+                Debug.Log($"CameraFollow: Found player via tag (no network object) at {target.position}");
+                return;
+            }
+        }
+        
+        Debug.Log("CameraFollow: No local player found in this search attempt");
     }
     
     private void Update()
@@ -259,13 +278,49 @@ public class CameraFollow : MonoBehaviour
         if (target == null)
             return;
             
-        Gizmos.color = Color.yellow;
-        Gizmos.DrawLine(transform.position, target.position);
-        
-        Gizmos.color = Color.red;
-        Gizmos.DrawWireSphere(target.position, 0.5f);
-        
-        Gizmos.color = Color.blue;
+        Gizmos.color = Color.green;
         Gizmos.DrawWireSphere(GetTargetPosition(), 0.5f);
+    }
+    
+    // Public method to be called from NetworkManagerUI
+    public void FindLocalPlayerWithRetry()
+    {
+        Debug.Log("CameraFollow: Starting to find local player with retry");
+        isSearchingForPlayer = true;
+        retryCount = 0;
+        StartCoroutine(FindLocalPlayerWithRetryCoroutine());
+    }
+    
+    private IEnumerator FindLocalPlayerWithRetryCoroutine()
+    {
+        Debug.Log("CameraFollow: Starting search for local player");
+        
+        // Small delay to ensure player has time to spawn
+        yield return new WaitForSeconds(0.5f);
+        
+        // First attempt
+        FindLocalPlayer();
+        
+        // If target is still null, retry a few times
+        int attempts = 0;
+        while (target == null && attempts < maxRetries)
+        {
+            attempts++;
+            Debug.Log($"CameraFollow: Retry {attempts}/{maxRetries} to find local player");
+            yield return new WaitForSeconds(retryInterval);
+            FindLocalPlayer();
+        }
+        
+        if (target != null)
+        {
+            Debug.Log($"CameraFollow: Successfully found local player at {target.position}");
+            ResetCameraPosition();
+        }
+        else
+        {
+            Debug.LogError("CameraFollow: Failed to find local player after multiple attempts");
+        }
+        
+        isSearchingForPlayer = false;
     }
 }
