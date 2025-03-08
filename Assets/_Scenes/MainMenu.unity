@@ -333,7 +333,7 @@ MonoBehaviour:
   startupPanel: {fileID: 1240801667}
   startupCanvasGroup: {fileID: 1240801669}
   fadeOutDuration: 0.5
-  defaultIP: 192.168.0.52
+  defaultIP: 2.122.204.31
   defaultPort: 7777
   gameSceneName: Game
   sceneLoadDelay: 1
@@ -366,7 +366,7 @@ MonoBehaviour:
   m_MaxConnectAttempts: 60
   m_DisconnectTimeoutMS: 30000
   ConnectionData:
-    Address: 0.0.0.0
+    Address: 2.122.204.31
     Port: 7777
     ServerListenAddress: 0.0.0.0
   DebugSimulator:
