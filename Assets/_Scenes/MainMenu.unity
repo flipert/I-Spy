@@ -1750,7 +1750,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7a78ff70e29c5421ebed0dfa646079aa, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  serverListPanel: {fileID: 1992328348}
+  serverListPanel: {fileID: 853250630}
   serverEntryPrefab: {fileID: 6189474017380109411, guid: 207429e35d5e548d3b1e41e9c05f71d1, type: 3}
   serverListContent: {fileID: 1717363028}
   refreshButton: {fileID: 166370298}
@@ -3677,7 +3677,6 @@ GameObject:
   m_Component:
   - component: {fileID: 1729329569}
   - component: {fileID: 1729329571}
-  - component: {fileID: 1729329570}
   m_Layer: 5
   m_Name: CreateMatch
   m_TagString: Untagged
@@ -3705,26 +3704,6 @@ RectTransform:
   m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 0, y: 0}
   m_Pivot: {x: 0.5, y: 0.5}
---- !u!114 &1729329570
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1729329568}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 7a78ff70e29c5421ebed0dfa646079aa, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  serverListPanel: {fileID: 853250630}
-  serverEntryPrefab: {fileID: 6189474017380109411, guid: 207429e35d5e548d3b1e41e9c05f71d1, type: 3}
-  serverListContent: {fileID: 1717363028}
-  refreshButton: {fileID: 166370298}
-  backButton: {fileID: 157015987}
-  statusText: {fileID: 1476156333}
-  mainMenuPanel: {fileID: 1942539768}
-  statusMessageDuration: 3
 --- !u!222 &1729329571
 CanvasRenderer:
   m_ObjectHideFlags: 0
