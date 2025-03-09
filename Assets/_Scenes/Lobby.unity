@@ -2812,6 +2812,10 @@ PrefabInstance:
       value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 6225361323105101879, guid: 76b6e7b70cc3449f48ee618c650877ac, type: 3}
+      propertyPath: characterSelectionTimeLimit
+      value: 100
+      objectReference: {fileID: 0}
+    - target: {fileID: 6225361323105101879, guid: 76b6e7b70cc3449f48ee618c650877ac, type: 3}
       propertyPath: availableCharacterPrefabs.Array.size
       value: 2
       objectReference: {fileID: 0}

@@ -183,34 +183,59 @@ public class ServerBrowser : MonoBehaviour
     // Ensure the MatchmakingManager exists
     private void EnsureMatchmakingManagerExists()
     {
+        // Try to find it by static instance first
+        if (MatchmakingManager.Instance != null)
+        {
+            matchmakingManager = MatchmakingManager.Instance;
+            Debug.Log("ServerBrowser: Found MatchmakingManager via singleton Instance");
+            return;
+        }
+        
+        // As a fallback, try to find it in the scene
         matchmakingManager = FindObjectOfType<MatchmakingManager>();
         
         if (matchmakingManager == null)
         {
-            Debug.LogWarning("ServerBrowser: MatchmakingManager not found! Creating one...");
+            Debug.LogError("ServerBrowser: MatchmakingManager not found in scene! Server discovery won't work.");
+            Debug.LogError("ServerBrowser: Please make sure a MatchmakingManager exists in your scene.");
             
-            // Create the MatchmakingManager
-            GameObject matchmakingManagerGO = new GameObject("MatchmakingManager");
-            matchmakingManager = matchmakingManagerGO.AddComponent<MatchmakingManager>();
-            
-            Debug.Log("ServerBrowser: Created MatchmakingManager");
+            // Don't create one - it should exist as a singleton
+            // Show a notification to help with debugging
+            ShowStatusMessage("Error: Network Manager missing!");
         }
         else
         {
-            Debug.Log("ServerBrowser: Found existing MatchmakingManager");
+            Debug.Log("ServerBrowser: Found existing MatchmakingManager in scene");
         }
     }
     
     private void OnEnable()
     {
+        // Make sure we have a reference to MatchmakingManager
+        EnsureMatchmakingManagerExists();
+        
         // Subscribe to events from MatchmakingManager
         if (matchmakingManager != null)
         {
+            // First unsubscribe to avoid duplicate subscriptions
+            matchmakingManager.OnServerListUpdated -= OnServerListUpdated;
+            matchmakingManager.OnCreateServerSuccess -= OnCreateServerSuccess;
+            matchmakingManager.OnCreateServerFailed -= OnCreateServerFailed;
+            matchmakingManager.OnJoinServerSuccess -= OnJoinServerSuccess;
+            matchmakingManager.OnJoinServerFailed -= OnJoinServerFailed;
+            
+            // Then subscribe
             matchmakingManager.OnServerListUpdated += OnServerListUpdated;
             matchmakingManager.OnCreateServerSuccess += OnCreateServerSuccess;
             matchmakingManager.OnCreateServerFailed += OnCreateServerFailed;
             matchmakingManager.OnJoinServerSuccess += OnJoinServerSuccess;
             matchmakingManager.OnJoinServerFailed += OnJoinServerFailed;
+            
+            Debug.Log("ServerBrowser: Successfully subscribed to MatchmakingManager events");
+        }
+        else
+        {
+            Debug.LogError("ServerBrowser: Failed to find MatchmakingManager! Server discovery will not work.");
         }
         
         // Always clear the server list when this panel is enabled
@@ -278,24 +303,63 @@ public class ServerBrowser : MonoBehaviour
     // Refresh the server list
     public void RefreshServerList()
     {
+        // First ensure all references exist
+        if (!EnsureReferencesExist())
+        {
+            Debug.LogError("ServerBrowser: Cannot refresh - references not complete");
+            ShowStatusMessage("Error: Server browser not properly set up!");
+            return;
+        }
+        
+        // Make sure MatchmakingManager exists
+        if (matchmakingManager == null)
+        {
+            EnsureMatchmakingManagerExists();
+        }
+        
         if (matchmakingManager != null)
         {
+            Debug.Log("ServerBrowser: Refreshing server list...");
+            
             // First clear any existing entries
             ClearServerList();
             
             // Show loading status
             ShowStatusMessage("Refreshing server list...");
             
-            // Request the MatchmakingManager to clear its cached data
-            matchmakingManager.ClearAllServerData();
-            
-            // Start server discovery
-            matchmakingManager.StartServerDiscovery();
+            try
+            {
+                // Request the MatchmakingManager to clear its cached data
+                matchmakingManager.ClearAllServerData();
+                
+                // Start server discovery with a clean slate
+                matchmakingManager.StopServerDiscovery();
+                
+                // Wait a moment before starting discovery again
+                StartCoroutine(DelayedStartDiscovery());
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"ServerBrowser: Error refreshing server list: {ex.Message}");
+                ShowStatusMessage("Error refreshing servers. Try again.");
+            }
         }
         else
         {
-            Debug.LogError("ServerBrowser: MatchmakingManager reference is missing!");
-            ShowStatusMessage("Error: MatchmakingManager not found!");
+            Debug.LogError("ServerBrowser: MatchmakingManager reference is missing after attempting to find it!");
+            ShowStatusMessage("Error: Cannot find network manager!");
+        }
+    }
+    
+    // Start discovery after a short delay to allow previous discovery to clean up
+    private IEnumerator DelayedStartDiscovery()
+    {
+        yield return new WaitForSeconds(0.5f);
+        
+        if (matchmakingManager != null)
+        {
+            Debug.Log("ServerBrowser: Starting server discovery...");
+            matchmakingManager.StartServerDiscovery();
         }
     }
     
