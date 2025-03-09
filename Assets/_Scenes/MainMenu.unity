@@ -2587,16 +2587,16 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 16bc7ba51fda14681be2df866d0ae381, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  mainMenuPanel: {fileID: 0}
-  serverBrowserPanel: {fileID: 0}
-  createMatchButton: {fileID: 0}
-  joinMatchButton: {fileID: 0}
-  settingsButton: {fileID: 0}
-  quitButton: {fileID: 0}
-  createMatchPanel: {fileID: 0}
-  serverNameInput: {fileID: 0}
-  createServerButton: {fileID: 0}
-  cancelCreateButton: {fileID: 0}
+  mainMenuPanel: {fileID: 1942539768}
+  serverBrowserPanel: {fileID: 853250630}
+  createMatchButton: {fileID: 709471753}
+  joinMatchButton: {fileID: 2066999811}
+  settingsButton: {fileID: 1033071759}
+  quitButton: {fileID: 87460457}
+  createMatchPanel: {fileID: 1729329568}
+  serverNameInput: {fileID: 984826407}
+  createServerButton: {fileID: 1282630797}
+  cancelCreateButton: {fileID: 838743602}
 --- !u!1 &1203245011
 GameObject:
   m_ObjectHideFlags: 0
