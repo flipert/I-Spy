@@ -115,17 +115,16 @@ public class MatchmakingManager : MonoBehaviour
     
     private void Awake()
     {
-        // Singleton setup
-        if (Instance == null)
+        // Singleton setup with better logging
+        if (Instance != null && Instance != this)
         {
-            Instance = this;
-            DontDestroyOnLoad(gameObject);
-        }
-        else
-        {
+            Debug.Log($"MatchmakingManager: Another instance already exists. Destroying duplicate at {gameObject.name}");
             Destroy(gameObject);
             return;
         }
+        
+        Instance = this;
+        DontDestroyOnLoad(gameObject);
         
         // Make sure NetworkManager exists and persists
         if (NetworkManager.Singleton == null)
@@ -150,33 +149,6 @@ public class MatchmakingManager : MonoBehaviour
                     networkManager.NetworkConfig = new NetworkConfig();
                 }
                 
-                // Set the transport in the NetworkConfig
-                networkManager.NetworkConfig.NetworkTransport = transport;
-                
-                // Ensure we don't auto-spawn players
-                networkManager.NetworkConfig.PlayerPrefab = null;
-                networkManager.NetworkConfig.ConnectionApproval = true;
-                
-                Debug.Log("MatchmakingManager: Created new NetworkManager with transport");
-            }
-            else
-            {
-                Debug.Log("MatchmakingManager: Found existing NetworkManager");
-                
-                // Make sure it has a transport
-                UnityTransport transport = networkManager.GetComponent<UnityTransport>();
-                if (transport == null)
-                {
-                    transport = networkManager.gameObject.AddComponent<UnityTransport>();
-                }
-                
-                // Initialize NetworkConfig if needed
-                if (networkManager.NetworkConfig == null)
-                {
-                    networkManager.NetworkConfig = new NetworkConfig();
-                }
-                
-                // Set the transport
                 networkManager.NetworkConfig.NetworkTransport = transport;
             }
             
@@ -185,7 +157,7 @@ public class MatchmakingManager : MonoBehaviour
         }
         else
         {
-            Debug.Log("MatchmakingManager: NetworkManager.Singleton already exists");
+            Debug.Log("MatchmakingManager: Using existing NetworkManager.Singleton");
             
             // Make sure it has a properly configured transport
             if (NetworkManager.Singleton.NetworkConfig == null)
@@ -691,31 +663,34 @@ public class MatchmakingManager : MonoBehaviour
     #region Server Discovery and Joining
     
     /// <summary>
-    /// Start discovering available servers
+    /// Start the server discovery process
     /// </summary>
     public void StartServerDiscovery()
     {
-        Debug.Log("MatchmakingManager: Starting server discovery");
-        
-        // Don't start discovery if it's already running
-        if (isRefreshingServers)
+        // Don't start discovery if we're already in a game session
+        if (IsServer || IsHost)
         {
-            Debug.Log("MatchmakingManager: Server discovery already running");
+            Debug.Log("MatchmakingManager: Won't start discovery while hosting a server");
             return;
         }
         
-        // Start the periodic server refresh
-        if (serverDiscoveryCoroutine != null)
-        {
-            StopCoroutine(serverDiscoveryCoroutine);
-        }
+        // Stop any existing discovery process first
+        StopServerDiscovery();
         
-        // Start UDP discovery
+        // Clear the old server data to avoid showing stale entries
+        discoveredServers.Clear();
+        
+        Debug.Log("MatchmakingManager: Starting server discovery process");
+        
+        // Start UDP discovery for LAN servers
         StartUdpDiscovery();
         
-        // Still use the coroutine for refreshing the list periodically
+        // Start the coroutine for periodic server list refresh
+        isRefreshingServers = true;
         serverDiscoveryCoroutine = StartCoroutine(RefreshServersCoroutine());
-        Debug.Log("MatchmakingManager: Server discovery started");
+        
+        // Force an immediate refresh
+        RefreshServerList();
     }
     
     /// <summary>
@@ -880,144 +855,63 @@ public class MatchmakingManager : MonoBehaviour
     
     private void RefreshServerList()
     {
-        // In a real implementation, you would query a master server or use a discovery service
-        
         Debug.Log("MatchmakingManager: Refreshing server list");
         
         // Clear the current list
         Debug.Log($"MatchmakingManager: Clearing server list (count before: {availableServers.Count})");
         availableServers.Clear();
         
-        try
+        // Add any discovered servers from UDP broadcasts
+        bool foundServers = AddDiscoveredUdpServers();
+        
+        // If network discovery hasn't found any servers, log a message
+        if (!foundServers)
         {
-            // First, add any servers we've found via UDP broadcast
-            bool foundUdpServers = AddDiscoveredUdpServers();
-            
-            if (foundUdpServers)
-            {
-                Debug.Log("MatchmakingManager: Found servers via UDP broadcast");
-            }
-            
-            // Check for cross-process file next (most reliable for same machine)
-            // But only if we're hosting or explicitly want to reconnect to a previous session
-            bool shouldCheckForSavedServers = IsHost || IsServer;
-            
-            #if UNITY_EDITOR
-            // In editor mode, control this with a debug flag
-            shouldCheckForSavedServers = false; // Set to true only when testing reconnection
-            #endif
-            
-            if (availableServers.Count == 0 && shouldCheckForSavedServers)
-            {
-                string filePath = Path.Combine(Application.persistentDataPath, "serverInfo.json");
-                if (File.Exists(filePath))
-                {
-                    try
-                    {
-                        string jsonData = File.ReadAllText(filePath);
-                        ServerInfo serverInfo = JsonUtility.FromJson<ServerInfo>(jsonData);
-                        
-                        // Check if the data is valid and recent
-                        if (serverInfo != null && !string.IsNullOrEmpty(serverInfo.serverName))
-                        {
-                            Debug.Log($"MatchmakingManager: Found server info in file: {serverInfo.serverName} at {serverInfo.ipAddress}:{serverInfo.port}");
-                            availableServers.Add(serverInfo);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.LogWarning($"MatchmakingManager: Error reading server info file: {ex.Message}");
-                    }
-                }
-            }
-            
-            // Fallback to PlayerPrefs if no file found
-            if (availableServers.Count == 0 && PlayerPrefs.HasKey("LocalServerName"))
-            {
-                string serverName = PlayerPrefs.GetString("LocalServerName", "Unknown Server");
-                string ipAddress = PlayerPrefs.GetString("LocalServerIP", "127.0.0.1");
-                int port = PlayerPrefs.GetInt("LocalServerPort", 7777);
-                int players = PlayerPrefs.GetInt("LocalServerPlayers", 0);
-                int maxPlayers = PlayerPrefs.GetInt("LocalServerMaxPlayers", 6);
-                bool inGame = PlayerPrefs.GetInt("LocalServerInGame", 0) == 1;
-                
-                // Add the local server to the list
-                ServerInfo localServer = new ServerInfo(
-                    serverName,
-                    ipAddress,
-                    (ushort)port,
-                    players,
-                    maxPlayers,
-                    inGame
-                );
-                
-                Debug.Log($"MatchmakingManager: Found local server in PlayerPrefs: {serverName} at {ipAddress}:{port}");
-                availableServers.Add(localServer);
-            }
-            else if (availableServers.Count == 0)
-            {
-                Debug.Log("MatchmakingManager: No local server found");
-                
-                // If we're in a build, try to find common local IP addresses
-                #if !UNITY_EDITOR
-                // Try common local IPs
-                string localIP = GetLocalIPv4();
-                if (!string.IsNullOrEmpty(localIP) && localIP != "127.0.0.1")
-                {
-                    // Parse IP to try common router addresses
-                    string[] parts = localIP.Split('.');
-                    if (parts.Length == 4)
-                    {
-                        // Try standard router IPs
-                        string subnet = $"{parts[0]}.{parts[1]}.{parts[2]}.";
-                        
-                        // Add some potential IPs for testing
-                        Debug.Log($"MatchmakingManager: Adding potential hosts in subnet {subnet}");
-                        
-                        // Common router/server IPs
-                        availableServers.Add(new ServerInfo($"Potential Host ({subnet}1)", $"{subnet}1", 7777, 1, 6, false));
-                        availableServers.Add(new ServerInfo($"Potential Host ({subnet}100)", $"{subnet}100", 7777, 1, 6, false));
-                        availableServers.Add(new ServerInfo($"Potential Host ({subnet}101)", $"{subnet}101", 7777, 1, 6, false));
-                    }
-                }
-                #endif
-            }
-            
-            // Only add mock servers in specific cases
-            if (availableServers.Count == 0)
-            {
-                // Add mock/test servers ONLY in editor play mode for testing
-                #if UNITY_EDITOR
-                // Check if we should show test servers (you can add a setting for this)
-                bool showTestServers = showTestServersInEditor;
-                
-                if (showTestServers)
-                {
-                    Debug.Log("MatchmakingManager: Adding mock test server in editor for testing");
-                    availableServers.Add(new ServerInfo("Test Server (Editor)", "127.0.0.1", 7777, 2, 6, false));
-                }
-                #else
-                // In a build, don't add any fake servers by default
-                // Instead, just log that no servers were found
-                Debug.Log("MatchmakingManager: No servers found on the network");
-                #endif
-            }
-        }
-        catch (Exception ex)
-        {
-            Debug.LogError($"MatchmakingManager: Error refreshing server list: {ex.Message}");
+            // This code can load saved servers from PlayerPrefs if implemented
+            Debug.Log("MatchmakingManager: No discovered servers found");
         }
         
-        // Notify listeners that the server list has been updated
+        // REMOVED: Do not add potential hosts automatically
+        // This code was causing "phantom" server entries to appear
+        /*
+        // If we still don't have any servers, add potential hosts in the subnet as a fallback
+        if (availableServers.Count == 0 && addPotentialHostsWhenEmpty)
+        {
+            // This is just for user experience - showing potential hosts the user might try to connect to
+            string localIP = GetLocalIPv4();
+            if (!string.IsNullOrEmpty(localIP))
+            {
+                string[] ipParts = localIP.Split('.');
+                if (ipParts.Length == 4)
+                {
+                    string subnet = $"{ipParts[0]}.{ipParts[1]}.{ipParts[2]}";
+                    
+                    // Add a few potential servers in the local subnet
+                    Debug.Log($"MatchmakingManager: Adding potential hosts in subnet {subnet}.x");
+                    availableServers.Add(new ServerInfo("Potential Host", $"{subnet}.1", 7777, 0, maxPlayersPerServer, false));
+                    
+                    // Don't add too many potential hosts to avoid cluttering the UI
+                    if (debugShowExtraHosts)
+                    {
+                        availableServers.Add(new ServerInfo("Potential Host", $"{subnet}.100", 7777, 0, maxPlayersPerServer, false));
+                        availableServers.Add(new ServerInfo("Potential Host", $"{subnet}.254", 7777, 0, maxPlayersPerServer, false));
+                    }
+                }
+            }
+        }
+        */
+        
+        // Log the results
         Debug.Log($"MatchmakingManager: Server list updated with {availableServers.Count} servers");
-        
-        // Log all servers for debugging
-        for (int i = 0; i < availableServers.Count; i++)
+        if (availableServers.Count > 0)
         {
-            var server = availableServers[i];
-            Debug.Log($"MatchmakingManager: Server [{i}]: {server.serverName} at {server.ipAddress}:{server.port}");
+            foreach (var server in availableServers)
+            {
+                Debug.Log($"MatchmakingManager: Available server: {server.serverName} at {server.ipAddress}:{server.port} ({server.currentPlayers}/{server.maxPlayers})");
+            }
         }
         
+        // Notify listeners about the updated server list
         OnServerListUpdated?.Invoke(availableServers);
     }
     
@@ -1544,15 +1438,23 @@ public class MatchmakingManager : MonoBehaviour
     }
     
     /// <summary>
-    /// Clear all server data for a fresh start (called during development for testing)
+    /// Clears all server data, used when returning to main menu or when refreshing
     /// </summary>
     public void ClearAllServerData()
     {
-        // Clear in-memory list
+        Debug.Log("MatchmakingManager: Clearing all server data");
+        
+        // Stop any ongoing server discovery
+        StopServerDiscovery();
+        
+        // Clear all discovered servers
+        discoveredServers.Clear();
+        
+        // Clear available servers list
         availableServers.Clear();
         
-        // Clear discovered servers
-        discoveredServers.Clear();
+        // Notify subscribers that the server list is now empty
+        OnServerListUpdated?.Invoke(new List<ServerInfo>());
         
         // Clear PlayerPrefs
         PlayerPrefs.DeleteKey("LocalServerName");
@@ -1564,14 +1466,12 @@ public class MatchmakingManager : MonoBehaviour
         PlayerPrefs.DeleteKey("LocalServerTimestamp");
         PlayerPrefs.Save();
         
-        // Delete server info file
-        string filePath = Path.Combine(Application.persistentDataPath, "serverInfo.json");
-        if (File.Exists(filePath))
+        // If we are still a server, re-register it after clearing
+        if (IsServer || IsHost)
         {
-            File.Delete(filePath);
+            Debug.Log("MatchmakingManager: We are still a server, re-registering after clearing data");
+            RegisterServer();
         }
-        
-        Debug.Log("MatchmakingManager: All server data cleared");
     }
 }
 

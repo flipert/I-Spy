@@ -68,7 +68,35 @@ public class MainMenuUI : MonoBehaviour
             // Check if we have a ServerBrowserPanel to attach it to
             if (serverBrowserPanel != null)
             {
+                // First, make sure the panel has the required UI elements
+                Transform content = serverBrowserPanel.transform.Find("Scroll View/Viewport/Content");
+                if (content == null)
+                {
+                    Debug.LogError("MainMenuUI: ServerBrowserPanel is missing the required 'Content' child. Please set up the UI hierarchy properly.");
+                    // Create missing UI elements
+                    GameObject scrollView = new GameObject("Scroll View", typeof(ScrollRect));
+                    scrollView.transform.SetParent(serverBrowserPanel.transform, false);
+                    
+                    GameObject viewport = new GameObject("Viewport", typeof(RectTransform));
+                    viewport.transform.SetParent(scrollView.transform, false);
+                    
+                    GameObject contentGO = new GameObject("Content", typeof(RectTransform));
+                    contentGO.transform.SetParent(viewport.transform, false);
+                    
+                    // Configure ScrollRect
+                    ScrollRect scrollRect = scrollView.GetComponent<ScrollRect>();
+                    scrollRect.viewport = viewport.GetComponent<RectTransform>();
+                    scrollRect.content = contentGO.GetComponent<RectTransform>();
+                    
+                    content = contentGO.transform;
+                }
+                
+                // Add the ServerBrowser component
                 serverBrowser = serverBrowserPanel.AddComponent<ServerBrowser>();
+                
+                // Set up the UI components
+                serverBrowser.SetupUIComponents();
+                
                 Debug.Log("MainMenuUI: Added ServerBrowser component to serverBrowserPanel");
             }
             else
@@ -77,6 +105,10 @@ public class MainMenuUI : MonoBehaviour
                 GameObject serverBrowserGO = new GameObject("ServerBrowser");
                 serverBrowser = serverBrowserGO.AddComponent<ServerBrowser>();
                 Debug.Log("MainMenuUI: Created new ServerBrowser GameObject");
+                
+                // In this case, we need to create a whole UI hierarchy
+                // This would get complex, so recommend setting up in the Editor instead
+                Debug.LogWarning("MainMenuUI: Created ServerBrowser without proper UI hierarchy. Please set up the UI in the Editor.");
             }
         }
         else
@@ -176,27 +208,50 @@ public class MainMenuUI : MonoBehaviour
     // Show the server browser panel
     public void ShowServerBrowserPanel()
     {
-        if (mainMenuPanel != null)
-            mainMenuPanel.SetActive(false);
+        // Hide all panels first
+        HideAllPanels();
+        
+        // Ensure serverBrowser reference is valid
+        EnsureServerBrowserExists();
+        
+        // Reset the server browser completely to avoid stale data
+        if (serverBrowser != null)
+        {
+            Debug.Log("MainMenuUI: Reset ServerBrowser before showing panel");
             
-        if (serverBrowserPanel != null)
-            serverBrowserPanel.SetActive(true);
+            // Ensure UI components are properly set up
+            serverBrowser.SetupUIComponents();
             
-        if (createMatchPanel != null)
-            createMatchPanel.SetActive(false);
+            // Clear any existing data to ensure a fresh start
+            serverBrowser.ClearServerData();
+            
+            // Activate the panel
+            if (serverBrowserPanel != null)
+            {
+                serverBrowserPanel.SetActive(true);
+            }
+            else
+            {
+                Debug.LogError("MainMenuUI: serverBrowserPanel is null! Cannot show server browser.");
+            }
+        }
+        else
+        {
+            Debug.LogError("MainMenuUI: Failed to create or find ServerBrowser component!");
+        }
     }
     
     // Show the create match panel
     public void ShowCreateMatchPanel()
     {
-        if (mainMenuPanel != null)
-            mainMenuPanel.SetActive(false);
-            
-        if (serverBrowserPanel != null)
-            serverBrowserPanel.SetActive(false);
-            
+        // Hide all panels first
+        HideAllPanels();
+        
+        // Show only the create match panel
         if (createMatchPanel != null)
             createMatchPanel.SetActive(true);
+        else
+            Debug.LogError("MainMenuUI: createMatchPanel is null! Cannot show create match panel.");
     }
     
     // Hide the create match panel
@@ -206,5 +261,19 @@ public class MainMenuUI : MonoBehaviour
             createMatchPanel.SetActive(false);
     }
     
+    // Hide all panels
+    private void HideAllPanels()
+    {
+        if (mainMenuPanel != null)
+            mainMenuPanel.SetActive(false);
+            
+        if (serverBrowserPanel != null)
+            serverBrowserPanel.SetActive(false);
+            
+        if (createMatchPanel != null)
+            createMatchPanel.SetActive(false);
+    }
+    
     #endregion
 }
+

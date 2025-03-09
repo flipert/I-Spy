@@ -2809,7 +2809,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 6225361323105101879, guid: 76b6e7b70cc3449f48ee618c650877ac, type: 3}
       propertyPath: minPlayersToStart
-      value: 1
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 6225361323105101879, guid: 76b6e7b70cc3449f48ee618c650877ac, type: 3}
       propertyPath: availableCharacterPrefabs.Array.size

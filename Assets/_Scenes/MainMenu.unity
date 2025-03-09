@@ -1729,6 +1729,7 @@ RectTransform:
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
+  - {fileID: 1992328349}
   - {fileID: 1531533745}
   m_Father: {fileID: 1199148548}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
@@ -3386,7 +3387,7 @@ MonoBehaviour:
   m_faceColor:
     serializedVersion: 2
     rgba: 4294967295
-  m_fontSize: 18
+  m_fontSize: 15.75
   m_fontSizeBase: 18
   m_fontWeight: 400
   m_enableAutoSizing: 1
@@ -3531,7 +3532,6 @@ RectTransform:
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 1251956242}
-  - {fileID: 1992328349}
   - {fileID: 351456457}
   m_Father: {fileID: 853250631}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
@@ -3717,13 +3717,13 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7a78ff70e29c5421ebed0dfa646079aa, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  serverListPanel: {fileID: 0}
-  serverEntryPrefab: {fileID: 0}
-  serverListContent: {fileID: 0}
-  refreshButton: {fileID: 0}
-  backButton: {fileID: 0}
-  statusText: {fileID: 0}
-  mainMenuPanel: {fileID: 0}
+  serverListPanel: {fileID: 853250630}
+  serverEntryPrefab: {fileID: 6189474017380109411, guid: 207429e35d5e548d3b1e41e9c05f71d1, type: 3}
+  serverListContent: {fileID: 1717363028}
+  refreshButton: {fileID: 166370298}
+  backButton: {fileID: 157015987}
+  statusText: {fileID: 1476156333}
+  mainMenuPanel: {fileID: 1942539768}
   statusMessageDuration: 3
 --- !u!222 &1729329571
 CanvasRenderer:
@@ -4568,12 +4568,12 @@ RectTransform:
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 650931785}
-  m_Father: {fileID: 1531533745}
+  m_Father: {fileID: 853250631}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
   m_AnchorMax: {x: 1, y: 1}
-  m_AnchoredPosition: {x: -0.0006713867, y: 17.243881}
-  m_SizeDelta: {x: 0.104400635, y: -82.3344}
+  m_AnchoredPosition: {x: 0, y: 7.241394}
+  m_SizeDelta: {x: -152.39816, y: -173.15648}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &1992328350
 MonoBehaviour:

@@ -32,27 +32,140 @@ public class ServerBrowser : MonoBehaviour
     
     private void Awake()
     {
-        // Ensure MatchmakingManager exists
         EnsureMatchmakingManagerExists();
         
-        // Set up button listeners
-        if (refreshButton != null)
-            refreshButton.onClick.AddListener(RefreshServerList);
-            
-        if (backButton != null)
-            backButton.onClick.AddListener(OnBackButtonClicked);
-        
-        // Clear any status text
-        if (statusText != null)
-            statusText.text = "";
-            
-        // Try to find main menu panel if not set
-        if (mainMenuPanel == null)
+        // Ensure essential UI components are found
+        if (serverListContent == null)
         {
-            FindMainMenuPanel();
-        }
+            Debug.LogError("ServerBrowser: serverListContent is not assigned! Finding it in children...");
             
-        Debug.Log($"ServerBrowser Awake completed. Has MatchmakingManager: {matchmakingManager != null}");
+            // First, print the hierarchy for debugging
+            PrintUIHierarchy(transform, 0);
+            
+            // Look for Scroll View/Viewport/Content structure (standard Unity UI layout)
+            Transform scrollView = transform.Find("Scroll View");
+            if (scrollView != null)
+            {
+                Debug.Log("ServerBrowser: Found Scroll View");
+                Transform viewport = scrollView.Find("Viewport");
+                if (viewport != null)
+                {
+                    Debug.Log("ServerBrowser: Found Viewport");
+                    Transform content = viewport.Find("Content");
+                    if (content != null)
+                    {
+                        Debug.Log("ServerBrowser: Found Content at path: Scroll View/Viewport/Content");
+                        serverListContent = content;
+                    }
+                    else
+                    {
+                        Debug.LogError("ServerBrowser: Content transform not found under Viewport!");
+                    }
+                }
+                else
+                {
+                    Debug.LogError("ServerBrowser: Viewport transform not found under Scroll View!");
+                }
+            }
+            else
+            {
+                Debug.LogError("ServerBrowser: Scroll View transform not found!");
+                
+                // Try to find it in children using tag or name
+                serverListContent = transform.Find("ServerListContent") as Transform;
+                
+                // If still null, search deeper in hierarchy
+                if (serverListContent == null)
+                {
+                    Transform[] allChildren = GetComponentsInChildren<Transform>(true);
+                    foreach (Transform child in allChildren)
+                    {
+                        if (child.name.Contains("Content") && child.parent != null && child.parent.name.Contains("Viewport"))
+                        {
+                            serverListContent = child;
+                            Debug.Log("ServerBrowser: Found serverListContent by name pattern: " + child.name);
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            if (serverListContent == null)
+            {
+                Debug.LogError("ServerBrowser: Could not find serverListContent! Server entries will not be displayed.");
+                Debug.LogError("ServerBrowser: Please ensure your UI hierarchy includes: Scroll View/Viewport/Content");
+            }
+            else
+            {
+                Debug.Log("ServerBrowser: Successfully assigned serverListContent: " + serverListContent.name);
+            }
+        }
+        
+        // Ensure buttons are assigned
+        if (refreshButton == null)
+        {
+            Debug.LogWarning("ServerBrowser: refreshButton is not assigned! Finding it...");
+            refreshButton = transform.Find("RefreshButton")?.GetComponent<Button>();
+            
+            if (refreshButton == null)
+            {
+                // Try to find by name in children
+                Button[] buttons = GetComponentsInChildren<Button>(true);
+                foreach (Button button in buttons)
+                {
+                    if (button.name.Contains("Refresh"))
+                    {
+                        refreshButton = button;
+                        Debug.Log("ServerBrowser: Found refreshButton: " + button.name);
+                        break;
+                    }
+                }
+            }
+        }
+        
+        if (backButton == null)
+        {
+            Debug.LogWarning("ServerBrowser: backButton is not assigned! Finding it...");
+            backButton = transform.Find("BackButton")?.GetComponent<Button>();
+            
+            if (backButton == null)
+            {
+                // Try to find by name in children
+                Button[] buttons = GetComponentsInChildren<Button>(true);
+                foreach (Button button in buttons)
+                {
+                    if (button.name.Contains("Back"))
+                    {
+                        backButton = button;
+                        Debug.Log("ServerBrowser: Found backButton: " + button.name);
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // Setup button listeners if they exist
+        if (refreshButton != null)
+        {
+            refreshButton.onClick.AddListener(RefreshServerList);
+        }
+        
+        if (backButton != null)
+        {
+            backButton.onClick.AddListener(OnBackButtonClicked);
+        }
+        
+        FindMainMenuPanel();
+        RemoveTemplateEntries();
+        
+        if (serverListContent != null)
+        {
+            Debug.Log("ServerBrowser: Initialized with serverListContent found");
+        }
+        else
+        {
+            Debug.Log("ServerBrowser: Initialized with serverListContent missing");
+        }
     }
     
     // Helper method to find the main menu
@@ -116,15 +229,49 @@ public class ServerBrowser : MonoBehaviour
         
         // Always clear the server list when this panel is enabled
         ClearServerList();
-        ShowStatusMessage("Server list cleared. Click Refresh to search for servers.");
         
-        // Start refreshing the server list
+        // Add a small delay before refreshing the server list
+        // This avoids issues with test entries showing up temporarily
+        StartCoroutine(DelayedRefresh());
+    }
+    
+    private IEnumerator DelayedRefresh()
+    {
+        // Wait a brief moment to ensure everything is initialized
+        yield return new WaitForSeconds(0.5f);
+        
+        // Ensure all references exist
+        EnsureReferencesExist();
+        
+        // Check serverListContent after trying to find it
+        if (serverListContent == null)
+        {
+            Debug.LogError("ServerBrowser: serverListContent is still null after attempts to find it. Refresh will not display servers.");
+        }
+        
+        // Check MatchmakingManager
+        if (matchmakingManager == null)
+        {
+            Debug.LogError("ServerBrowser: MatchmakingManager is null before refresh! Attempting to find it...");
+            EnsureMatchmakingManagerExists();
+            
+            if (matchmakingManager == null)
+            {
+                Debug.LogError("ServerBrowser: Still could not find MatchmakingManager! Refresh will not work.");
+                yield break;
+            }
+        }
+        
+        // Additional delay to ensure UDP discovery has time to start
+        yield return new WaitForSeconds(0.5f);
+        
+        // Now refresh
         RefreshServerList();
     }
     
     private void OnDisable()
     {
-        // Unsubscribe from events
+        // Unsubscribe from events when disabled
         if (matchmakingManager != null)
         {
             matchmakingManager.OnServerListUpdated -= OnServerListUpdated;
@@ -132,13 +279,14 @@ public class ServerBrowser : MonoBehaviour
             matchmakingManager.OnCreateServerFailed -= OnCreateServerFailed;
             matchmakingManager.OnJoinServerSuccess -= OnJoinServerSuccess;
             matchmakingManager.OnJoinServerFailed -= OnJoinServerFailed;
-        }
-        
-        // Stop server discovery
-        if (matchmakingManager != null)
-        {
+            
+            // Stop any ongoing server discovery when panel is closed
             matchmakingManager.StopServerDiscovery();
         }
+        
+        // Clean up the UI
+        ClearServerList();
+        ClearStatusMessage();
     }
     
     // Refresh the server list
@@ -146,11 +294,22 @@ public class ServerBrowser : MonoBehaviour
     {
         if (matchmakingManager != null)
         {
+            // First clear any existing entries
+            ClearServerList();
+            
             // Show loading status
             ShowStatusMessage("Refreshing server list...");
             
+            // Request the MatchmakingManager to clear its cached data
+            matchmakingManager.ClearAllServerData();
+            
             // Start server discovery
             matchmakingManager.StartServerDiscovery();
+        }
+        else
+        {
+            Debug.LogError("ServerBrowser: MatchmakingManager reference is missing!");
+            ShowStatusMessage("Error: MatchmakingManager not found!");
         }
     }
     
@@ -185,52 +344,80 @@ public class ServerBrowser : MonoBehaviour
     // Handle server list update event
     private void OnServerListUpdated(List<MatchmakingManager.ServerInfo> servers)
     {
-        // Clear current server entries
-        ClearServerList();
+        // Add robust null checks and logging
+        Debug.Log($"ServerBrowser: OnServerListUpdated called with {(servers != null ? servers.Count : 0)} servers");
         
-        // Filter out any potentially invalid servers
-        List<MatchmakingManager.ServerInfo> validServers = new List<MatchmakingManager.ServerInfo>();
-        if (servers != null)
-        {
-            foreach (var server in servers)
-            {
-                if (server != null && !string.IsNullOrEmpty(server.ipAddress))
-                {
-                    validServers.Add(server);
-                }
-                else
-                {
-                    Debug.LogWarning("ServerBrowser: Filtered out invalid server entry");
-                }
-            }
-        }
+        // Try to ensure references are valid before proceeding
+        EnsureReferencesExist();
         
-        // No valid servers found
-        if (validServers.Count == 0)
+        if (serverListContent == null)
         {
-            ShowStatusMessage("No servers found. Try refreshing.");
+            Debug.LogError("ServerBrowser: serverListContent is still null in OnServerListUpdated! Cannot display servers.");
             return;
         }
         
-        Debug.Log($"ServerBrowser: Creating UI for {validServers.Count} servers");
-        
-        // Create UI entries for each valid server
-        for (int i = 0; i < validServers.Count; i++)
+        try
         {
-            var server = validServers[i];
-            CreateServerEntry(server, i);
+            ClearServerList();
+        }
+        catch (System.NullReferenceException e)
+        {
+            Debug.LogError($"ServerBrowser: Error clearing server list: {e.Message}");
         }
         
-        // Clear status
+        if (servers == null || servers.Count == 0)
+        {
+            ShowStatusMessage("No servers found. Make sure a server is running and try again.");
+            return;
+        }
+        
+        // Hide status text if we have servers
         ClearStatusMessage();
+        
+        for (int i = 0; i < servers.Count; i++)
+        {
+            if (servers[i] == null)
+            {
+                Debug.LogWarning($"ServerBrowser: Server at index {i} is null, skipping");
+                continue;
+            }
+            
+            try
+            {
+                CreateServerEntry(servers[i], i);
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"ServerBrowser: Error creating server entry: {e.Message}");
+            }
+        }
     }
     
     // Clear the server list UI
     private void ClearServerList()
     {
-        foreach (var entry in serverEntries)
+        if (serverListContent == null)
         {
-            Destroy(entry);
+            Debug.LogWarning("ServerBrowser: serverListContent is null, cannot clear children");
+            return;
+        }
+        
+        int childCount = serverListContent.childCount;
+        Debug.Log($"ServerBrowser: Clearing server list with {childCount} children");
+        
+        // Destroy all existing server entries
+        foreach (GameObject entry in serverEntries)
+        {
+            if (entry != null)
+            {
+                Destroy(entry);
+            }
+        }
+        
+        // Also destroy any other children that might be in the content
+        for (int i = serverListContent.childCount - 1; i >= 0; i--)
+        {
+            Destroy(serverListContent.GetChild(i).gameObject);
         }
         
         serverEntries.Clear();
@@ -239,78 +426,57 @@ public class ServerBrowser : MonoBehaviour
     // Create a server entry in the UI
     private void CreateServerEntry(MatchmakingManager.ServerInfo server, int index)
     {
-        if (serverEntryPrefab == null || serverListContent == null)
-            return;
-            
-        // Validate server info
-        if (server == null || string.IsNullOrEmpty(server.ipAddress))
+        // Validate the server info before creating an entry
+        if (server == null || string.IsNullOrEmpty(server.serverName) || string.IsNullOrEmpty(server.ipAddress))
         {
-            Debug.LogWarning("ServerBrowser: Tried to create entry with invalid server info");
+            Debug.LogWarning($"ServerBrowser: Attempted to create entry for invalid server at index {index}");
             return;
         }
-            
+        
+        if (serverEntryPrefab == null || serverListContent == null)
+        {
+            Debug.LogError("ServerBrowser: Missing serverEntryPrefab or serverListContent references");
+            return;
+        }
+        
+        Debug.Log($"ServerBrowser: Creating server entry for {server.serverName} ({server.ipAddress}:{server.port})");
+        
         // Instantiate the server entry prefab
         GameObject entry = Instantiate(serverEntryPrefab, serverListContent);
-        serverEntries.Add(entry);
+        entry.name = $"ServerEntry_{index}_{server.serverName}";
         
-        // Setup the entry UI elements
-        TextMeshProUGUI serverNameText = entry.transform.Find("ServerNameText")?.GetComponent<TextMeshProUGUI>();
-        TextMeshProUGUI playerCountText = entry.transform.Find("PlayerCountText")?.GetComponent<TextMeshProUGUI>();
-        TextMeshProUGUI statusText = entry.transform.Find("StatusText")?.GetComponent<TextMeshProUGUI>();
-        Button joinButton = entry.transform.Find("JoinButton")?.GetComponent<Button>();
+        // Find components in the prefab
+        TextMeshProUGUI serverNameText = entry.transform.Find("TXTServerName")?.GetComponent<TextMeshProUGUI>();
+        TextMeshProUGUI playerCountText = entry.transform.Find("TXTPlayerCount")?.GetComponent<TextMeshProUGUI>();
+        TextMeshProUGUI pingText = entry.transform.Find("TXTPing")?.GetComponent<TextMeshProUGUI>();
+        Button joinButton = entry.transform.Find("BTNJoin")?.GetComponent<Button>();
         
-        // Set server name (use a default if empty)
+        // Set server information
         if (serverNameText != null)
         {
-            // Force clear any existing text first
-            serverNameText.text = "";
-            
-            // Then set the server name
-            if (!string.IsNullOrEmpty(server.serverName))
-            {
-                serverNameText.text = server.serverName;
-                Debug.Log($"ServerBrowser: Set server name text to: '{server.serverName}'");
-            }
-            else
-            {
-                // Provide a better default name based on IP
-                serverNameText.text = $"Server at {server.ipAddress}";
-                Debug.Log($"ServerBrowser: Used fallback name: 'Server at {server.ipAddress}'");
-            }
+            serverNameText.text = server.serverName;
         }
-            
-        // Set player count
+        
         if (playerCountText != null)
-            playerCountText.text = $"{server.currentPlayers}/{server.maxPlayers}";
-            
-        // Set status
-        if (statusText != null)
         {
-            if (server.inGame)
-            {
-                statusText.text = "In Progress";
-                statusText.color = Color.red;
-            }
-            else
-            {
-                statusText.text = "In Lobby";
-                statusText.color = Color.green;
-            }
+            playerCountText.text = $"{server.currentPlayers}/{server.maxPlayers}";
+        }
+        
+        if (pingText != null)
+        {
+            // Set ping to a placeholder or actual value if available
+            pingText.text = "---";
         }
         
         // Setup join button
         if (joinButton != null)
         {
-            // Store the server index for the button click handler
-            int serverIndex = index;
-            
-            // Remove any existing listeners and add a new one
-            joinButton.onClick.RemoveAllListeners();
-            joinButton.onClick.AddListener(() => OnJoinButtonClicked(serverIndex));
-            
-            // Disable join button if server is full or in game
-            joinButton.interactable = !server.inGame && server.currentPlayers < server.maxPlayers;
+            int serverIdx = index; // Capture index for the lambda
+            joinButton.onClick.AddListener(() => OnJoinButtonClicked(serverIdx));
         }
+        
+        // Add to our list for tracking
+        serverEntries.Add(entry);
     }
     
     // Join button click handler
@@ -397,14 +563,138 @@ public class ServerBrowser : MonoBehaviour
         statusMessageCoroutine = null;
     }
     
-    // Clear all server data (useful for debugging)
+    /// <summary>
+    /// Completely resets the server browser state, clearing all entries and cached data
+    /// </summary>
     public void ClearServerData()
     {
+        Debug.Log("ServerBrowser: Clearing all server data");
+        
+        // Stop discovery first
         if (matchmakingManager != null)
         {
+            matchmakingManager.StopServerDiscovery();
             matchmakingManager.ClearAllServerData();
+        }
+        
+        // Clear UI
+        if (serverEntries != null)
+        {
             ClearServerList();
-            ShowStatusMessage("All server data cleared.");
+        }
+        
+        // Clear status
+        if (statusText != null)
+        {
+            ShowStatusMessage("Ready to search for servers...");
+        }
+        
+        // Remove any template entries
+        RemoveTemplateEntries();
+    }
+    
+    // Ensure there are no template entries left in the hierarchy
+    private void RemoveTemplateEntries()
+    {
+        if (serverListContent == null)
+        {
+            Debug.LogWarning("ServerBrowser: Cannot remove template entries, serverListContent is null");
+            return;
+        }
+        
+        Debug.Log($"ServerBrowser: Checking for template entries, found {serverListContent.childCount} children");
+        
+        // Remove any child game objects that might be template entries
+        if (serverListContent.childCount > 0)
+        {
+            for (int i = serverListContent.childCount - 1; i >= 0; i--)
+            {
+                Transform child = serverListContent.GetChild(i);
+                Destroy(child.gameObject);
+            }
+        }
+    }
+    
+    // Method to ensure all references exist before using them
+    private bool EnsureReferencesExist()
+    {
+        // Try to set up UI components if they're missing
+        if (serverListContent == null)
+        {
+            Debug.LogError("ServerBrowser: Could not find serverListContent reference!");
+            SetupUIComponents();
+            
+            // Check if the setup was successful
+            if (serverListContent == null)
+            {
+                Debug.LogError("ServerBrowser: Failed to find serverListContent after setup attempt.");
+                return false;
+            }
+        }
+        
+        return true;
+    }
+    
+    // Add this method to directly assign the serverListContent
+    public void SetupUIComponents()
+    {
+        if (serverListContent == null)
+        {
+            Debug.Log("ServerBrowser: Attempting to find Content in hierarchy...");
+            
+            // Try to find the Content directly
+            Transform scrollView = transform.Find("Scroll View");
+            if (scrollView != null)
+            {
+                Transform viewport = scrollView.Find("Viewport");
+                if (viewport != null)
+                {
+                    Transform content = viewport.Find("Content");
+                    if (content != null)
+                    {
+                        serverListContent = content;
+                        Debug.Log("ServerBrowser: Successfully found and assigned Content transform!");
+                    }
+                }
+            }
+            
+            // If still not found, try to find by name
+            if (serverListContent == null)
+            {
+                // Search all children for "Content"
+                Transform[] allChildren = GetComponentsInChildren<Transform>(true);
+                foreach (Transform child in allChildren)
+                {
+                    if (child.name == "Content")
+                    {
+                        serverListContent = child;
+                        Debug.Log("ServerBrowser: Found Content by name: " + child.name);
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // Check if the reference was successfully set
+        if (serverListContent != null)
+        {
+            Debug.Log("ServerBrowser: serverListContent is now assigned to: " + serverListContent.name);
+        }
+        else
+        {
+            Debug.LogError("ServerBrowser: Failed to find Content transform!");
+        }
+    }
+    
+    // Helper method to print the UI hierarchy for debugging
+    private void PrintUIHierarchy(Transform transform, int depth)
+    {
+        string indent = new string(' ', depth * 4);
+        Debug.Log($"{indent}• {transform.name}");
+        
+        foreach (Transform child in transform)
+        {
+            PrintUIHierarchy(child, depth + 1);
         }
     }
 }
