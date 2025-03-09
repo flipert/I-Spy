@@ -106,66 +106,52 @@ public class ServerBrowser : MonoBehaviour
         {
             Debug.LogWarning("ServerBrowser: refreshButton is not assigned! Finding it...");
             refreshButton = transform.Find("RefreshButton")?.GetComponent<Button>();
-            
-            if (refreshButton == null)
-            {
-                // Try to find by name in children
-                Button[] buttons = GetComponentsInChildren<Button>(true);
-                foreach (Button button in buttons)
-                {
-                    if (button.name.Contains("Refresh"))
-                    {
-                        refreshButton = button;
-                        Debug.Log("ServerBrowser: Found refreshButton: " + button.name);
-                        break;
-                    }
-                }
-            }
         }
         
         if (backButton == null)
         {
             Debug.LogWarning("ServerBrowser: backButton is not assigned! Finding it...");
             backButton = transform.Find("BackButton")?.GetComponent<Button>();
-            
-            if (backButton == null)
-            {
-                // Try to find by name in children
-                Button[] buttons = GetComponentsInChildren<Button>(true);
-                foreach (Button button in buttons)
-                {
-                    if (button.name.Contains("Back"))
-                    {
-                        backButton = button;
-                        Debug.Log("ServerBrowser: Found backButton: " + button.name);
-                        break;
-                    }
-                }
-            }
         }
         
-        // Setup button listeners if they exist
+        // Setup button listeners
         if (refreshButton != null)
         {
+            refreshButton.onClick.RemoveAllListeners();
             refreshButton.onClick.AddListener(RefreshServerList);
+        }
+        else
+        {
+            Debug.LogError("ServerBrowser: refreshButton not found!");
         }
         
         if (backButton != null)
         {
+            backButton.onClick.RemoveAllListeners();
             backButton.onClick.AddListener(OnBackButtonClicked);
-        }
-        
-        FindMainMenuPanel();
-        RemoveTemplateEntries();
-        
-        if (serverListContent != null)
-        {
-            Debug.Log("ServerBrowser: Initialized with serverListContent found");
         }
         else
         {
-            Debug.Log("ServerBrowser: Initialized with serverListContent missing");
+            Debug.LogError("ServerBrowser: backButton not found!");
         }
+        
+        // Try to find mainMenuPanel
+        FindMainMenuPanel();
+        
+        // Initialize server entries list
+        serverEntries = new List<GameObject>();
+        
+        // Remove any template entries
+        RemoveTemplateEntries();
+        
+        // Reset status message
+        if (statusText != null)
+        {
+            statusText.gameObject.SetActive(false);
+        }
+        
+        // Auto-refresh when enabled
+        StartCoroutine(DelayedRefresh());
     }
     
     // Helper method to find the main menu

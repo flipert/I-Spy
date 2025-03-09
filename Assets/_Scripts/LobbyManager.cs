@@ -79,9 +79,28 @@ public class LobbyManager : NetworkBehaviour
             players = new PlayerInfo[playerDict.Count];
             int index = 0;
             
-            foreach (var kvp in playerDict)
+            foreach (var pair in playerDict)
             {
-                players[index] = kvp.Value;
+                // Create a copy of the PlayerInfo to ensure it's properly initialized
+                players[index] = new PlayerInfo();
+                
+                // Manually copy values to ensure proper initialization
+                if (pair.Value != null)
+                {
+                    players[index].clientId = pair.Value.clientId;
+                    players[index].playerName = pair.Value.playerName != null ? pair.Value.playerName : "Player";
+                    players[index].selectedCharacterIndex = pair.Value.selectedCharacterIndex;
+                    players[index].isReady = pair.Value.isReady;
+                }
+                else
+                {
+                    // Create a default player if the source is null
+                    players[index].clientId = pair.Key;
+                    players[index].playerName = "Player " + pair.Key;
+                    players[index].selectedCharacterIndex = -1;
+                    players[index].isReady = false;
+                }
+                
                 index++;
             }
         }
@@ -96,7 +115,20 @@ public class LobbyManager : NetworkBehaviour
                 
             foreach (var player in players)
             {
-                result[player.clientId] = player;
+                if (player == null)
+                {
+                    Debug.LogWarning("LobbyState.ToDictionary: Found null player in players array");
+                    continue;
+                }
+                
+                // Create a copy to ensure it's properly initialized
+                PlayerInfo newPlayer = new PlayerInfo();
+                newPlayer.clientId = player.clientId;
+                newPlayer.playerName = player.playerName != null ? player.playerName : "Player";
+                newPlayer.selectedCharacterIndex = player.selectedCharacterIndex;
+                newPlayer.isReady = player.isReady;
+                
+                result[player.clientId] = newPlayer;
             }
             
             return result;
@@ -112,11 +144,21 @@ public class LobbyManager : NetworkBehaviour
             if (serializer.IsReader)
             {
                 players = new PlayerInfo[length];
+                // Initialize each PlayerInfo object to avoid null references
+                for (int i = 0; i < length; i++)
+                {
+                    players[i] = new PlayerInfo();
+                }
             }
             
             // Serialize each player
             for (int i = 0; i < length; i++)
             {
+                if (serializer.IsWriter && players[i] == null)
+                {
+                    // If we're writing and the player is null, create a default one
+                    players[i] = new PlayerInfo();
+                }
                 serializer.SerializeValue(ref players[i]);
             }
         }
@@ -214,17 +256,42 @@ public class LobbyManager : NetworkBehaviour
             
         Debug.Log($"Client connected to lobby: {clientId}");
         
-        // Add player to the lobby
-        AddPlayerToLobby(clientId, "Player " + clientId);
-        
-        // Update the matchmaking manager player count
-        if (MatchmakingManager.Instance != null)
+        try 
         {
-            MatchmakingManager.Instance.UpdateServerPlayerCount(lobbyPlayers.Count);
+            // Add player to the lobby
+            AddPlayerToLobby(clientId, "Player " + clientId);
+            
+            // Update the matchmaking manager player count
+            if (MatchmakingManager.Instance != null)
+            {
+                MatchmakingManager.Instance.UpdateServerPlayerCount(lobbyPlayers.Count);
+            }
+            
+            // Create a safe copy of the lobby players dictionary
+            Dictionary<ulong, PlayerInfo> safePlayersCopy = new Dictionary<ulong, PlayerInfo>();
+            foreach (var kvp in lobbyPlayers)
+            {
+                // Create a new PlayerInfo to ensure it's properly initialized
+                PlayerInfo newPlayerInfo = new PlayerInfo(kvp.Key, kvp.Value != null ? kvp.Value.playerName : "Player " + kvp.Key);
+                if (kvp.Value != null)
+                {
+                    // Copy other properties if available
+                    newPlayerInfo.selectedCharacterIndex = kvp.Value.selectedCharacterIndex;
+                    newPlayerInfo.isReady = kvp.Value.isReady;
+                }
+                safePlayersCopy[kvp.Key] = newPlayerInfo;
+            }
+            
+            // Create a LobbyState with the safe copy
+            LobbyState lobbyState = new LobbyState(safePlayersCopy);
+            
+            // Update all clients with the new lobby state
+            UpdateLobbyStateClientRpc(lobbyState);
         }
-        
-        // Update all clients with the new lobby state
-        UpdateLobbyStateClientRpc(new LobbyState(lobbyPlayers));
+        catch (Exception ex)
+        {
+            Debug.LogError($"Error in OnClientConnected: {ex.Message}\n{ex.StackTrace}");
+        }
     }
     
     // Handle a client disconnecting from the lobby
@@ -596,18 +663,32 @@ public class LobbyManager : NetworkBehaviour
     [ClientRpc]
     private void UpdateLobbyStateClientRpc(LobbyState state)
     {
-        Debug.Log($"UpdateLobbyStateClientRpc received");
-        
-        // Convert the serializable array back to a dictionary
-        Dictionary<ulong, PlayerInfo> players = state.ToDictionary();
-        
-        Debug.Log($"UpdateLobbyStateClientRpc: {players.Count} players");
-        
-        // Update the local lobby state
-        lobbyPlayers = new Dictionary<ulong, PlayerInfo>(players);
-        
-        // Notify listeners
-        OnLobbyStateUpdated?.Invoke(lobbyPlayers);
+        try 
+        {
+            Debug.Log($"UpdateLobbyStateClientRpc received");
+            
+            // Check if the state is valid
+            if (state.players == null)
+            {
+                Debug.LogWarning("UpdateLobbyStateClientRpc: Received null players array");
+                state.players = new PlayerInfo[0];
+            }
+            
+            // Convert the serializable array back to a dictionary
+            Dictionary<ulong, PlayerInfo> players = state.ToDictionary();
+            
+            Debug.Log($"UpdateLobbyStateClientRpc: {players.Count} players");
+            
+            // Update the local lobby state
+            lobbyPlayers = new Dictionary<ulong, PlayerInfo>(players);
+            
+            // Notify listeners
+            OnLobbyStateUpdated?.Invoke(lobbyPlayers);
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError($"Error in UpdateLobbyStateClientRpc: {ex.Message}\n{ex.StackTrace}");
+        }
     }
     
     // RPC to notify clients about character selection
