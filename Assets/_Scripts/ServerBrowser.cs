@@ -5,6 +5,7 @@ using UnityEngine.UI;
 using TMPro;
 using System;
 using Unity.Netcode;
+using UnityEngine.Events;
 
 /// <summary>
 /// UI controller for the server browser screen
@@ -394,11 +395,34 @@ public class ServerBrowser : MonoBehaviour
     // Handle server list update event
     private void OnServerListUpdated(List<MatchmakingManager.ServerInfo> servers)
     {
-        // Add robust null checks and logging
-        Debug.Log($"ServerBrowser: OnServerListUpdated called with {(servers != null ? servers.Count : 0)} servers");
+        // Add robust null checks and detailed logging
+        if (servers != null)
+        {
+            Debug.Log($"ServerBrowser: OnServerListUpdated called with {servers.Count} servers");
+            
+            if (servers.Count > 0)
+            {
+                // Log details of the first server to help with debugging
+                var firstServer = servers[0];
+                Debug.Log($"ServerBrowser: First server details - Name: {firstServer.serverName}, " +
+                          $"IP: {firstServer.ipAddress}, Port: {firstServer.port}, " +
+                          $"Players: {firstServer.currentPlayers}/{firstServer.maxPlayers}, " +
+                          $"In Game: {firstServer.inGame}");
+            }
+        }
+        else
+        {
+            Debug.LogWarning("ServerBrowser: OnServerListUpdated called with null servers list");
+            servers = new List<MatchmakingManager.ServerInfo>();
+        }
         
         // Try to ensure references are valid before proceeding
-        EnsureReferencesExist();
+        if (!EnsureReferencesExist())
+        {
+            Debug.LogError("ServerBrowser: References missing, cannot update server list UI");
+            ShowStatusMessage("Error: UI components not found");
+            return;
+        }
         
         if (serverListContent == null)
         {
@@ -408,38 +432,64 @@ public class ServerBrowser : MonoBehaviour
         
         try
         {
+            // Clear existing entries
             ClearServerList();
-        }
-        catch (System.NullReferenceException e)
-        {
-            Debug.LogError($"ServerBrowser: Error clearing server list: {e.Message}");
-        }
-        
-        if (servers == null || servers.Count == 0)
-        {
-            ShowStatusMessage("No servers found. Make sure a server is running and try again.");
-            return;
-        }
-        
-        // Hide status text if we have servers
-        ClearStatusMessage();
-        
-        for (int i = 0; i < servers.Count; i++)
-        {
-            if (servers[i] == null)
+            
+            // Print hierarchy for debugging if having issues
+            if (servers.Count > 0 && serverListContent.childCount == 0)
             {
-                Debug.LogWarning($"ServerBrowser: Server at index {i} is null, skipping");
-                continue;
+                Debug.Log("ServerBrowser: Printing UI hierarchy to debug server entry creation:");
+                PrintUIHierarchy(transform, 0);
             }
             
-            try
+            if (servers.Count == 0)
             {
-                CreateServerEntry(servers[i], i);
+                ShowStatusMessage("No servers found. Make sure a server is running and try again.");
+                return;
             }
-            catch (System.Exception e)
+            
+            // Hide status text if we have servers
+            ClearStatusMessage();
+            
+            // Create server entries
+            for (int i = 0; i < servers.Count; i++)
             {
-                Debug.LogError($"ServerBrowser: Error creating server entry: {e.Message}");
+                if (servers[i] == null)
+                {
+                    Debug.LogWarning($"ServerBrowser: Server at index {i} is null, skipping");
+                    continue;
+                }
+                
+                try
+                {
+                    CreateServerEntry(servers[i], i);
+                    
+                    // Verify entry was created
+                    if (i < serverEntries.Count && serverEntries[i] != null)
+                    {
+                        Debug.Log($"ServerBrowser: Successfully created entry for server: {servers[i].serverName}");
+                    }
+                    else
+                    {
+                        Debug.LogError($"ServerBrowser: Failed to create/track entry for server: {servers[i].serverName}");
+                    }
+                }
+                catch (System.Exception e)
+                {
+                    Debug.LogError($"ServerBrowser: Error creating server entry at index {i}: {e.Message}\n{e.StackTrace}");
+                }
             }
+            
+            // Final verification
+            Debug.Log($"ServerBrowser: Created {serverEntries.Count} server entries out of {servers.Count} servers");
+            
+            // Check and fix all server entry buttons
+            EnsureServerEntryButtonsWork();
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"ServerBrowser: Unhandled error in OnServerListUpdated: {e.Message}\n{e.StackTrace}");
+            ShowStatusMessage("Error updating server list");
         }
     }
     
@@ -499,12 +549,34 @@ public class ServerBrowser : MonoBehaviour
         TextMeshProUGUI serverNameText = entry.transform.Find("TXTServerName")?.GetComponent<TextMeshProUGUI>();
         TextMeshProUGUI playerCountText = entry.transform.Find("TXTPlayerCount")?.GetComponent<TextMeshProUGUI>();
         TextMeshProUGUI pingText = entry.transform.Find("TXTPing")?.GetComponent<TextMeshProUGUI>();
+        
+        // Look for join button - either a specific button or the entry itself
         Button joinButton = entry.transform.Find("BTNJoin")?.GetComponent<Button>();
+        
+        // If no specific join button found, check if the entry itself is a button
+        if (joinButton == null)
+        {
+            joinButton = entry.GetComponent<Button>();
+            Debug.Log("ServerBrowser: Using the entire entry as the join button");
+        }
         
         // Set server information
         if (serverNameText != null)
         {
             serverNameText.text = server.serverName;
+        }
+        else
+        {
+            // If no specific server name text component, try to find any TextMeshProUGUI
+            TextMeshProUGUI[] texts = entry.GetComponentsInChildren<TextMeshProUGUI>();
+            if (texts.Length > 0)
+            {
+                texts[0].text = server.serverName;
+            }
+            else
+            {
+                Debug.LogWarning("ServerBrowser: No text components found to display server name");
+            }
         }
         
         if (playerCountText != null)
@@ -522,7 +594,21 @@ public class ServerBrowser : MonoBehaviour
         if (joinButton != null)
         {
             int serverIdx = index; // Capture index for the lambda
-            joinButton.onClick.AddListener(() => OnJoinButtonClicked(serverIdx));
+            
+            // Remove any existing listeners to avoid duplicates
+            joinButton.onClick.RemoveAllListeners();
+            
+            // Add new listener
+            joinButton.onClick.AddListener(() => {
+                Debug.Log($"ServerBrowser: Join button clicked for server {server.serverName} at index {serverIdx}");
+                OnJoinButtonClicked(serverIdx);
+            });
+            
+            Debug.Log($"ServerBrowser: Successfully set up join button for server {server.serverName}");
+        }
+        else
+        {
+            Debug.LogError("ServerBrowser: No Button component found on server entry! User won't be able to join this server.");
         }
         
         // Add to our list for tracking
@@ -532,20 +618,40 @@ public class ServerBrowser : MonoBehaviour
     // Join button click handler
     private void OnJoinButtonClicked(int serverIndex)
     {
+        Debug.Log($"ServerBrowser: OnJoinButtonClicked called for server index {serverIndex}");
+        
         if (matchmakingManager == null)
         {
             EnsureMatchmakingManagerExists();
             if (matchmakingManager == null)
             {
-                ShowStatusMessage("MatchmakingManager not found! Cannot join server.");
+                Debug.LogError("ServerBrowser: MatchmakingManager not found! Cannot join server.");
+                ShowStatusMessage("Error: Network manager not found!");
                 return;
             }
         }
-            
+        
+        // Get the list of available servers from the MatchmakingManager to verify index
+        List<MatchmakingManager.ServerInfo> servers = matchmakingManager.GetAvailableServers();
+        
+        if (servers == null || servers.Count == 0)
+        {
+            Debug.LogError("ServerBrowser: Available servers list is empty or null");
+            ShowStatusMessage("Error: No servers available to join");
+            return;
+        }
+        
+        if (serverIndex < 0 || serverIndex >= servers.Count)
+        {
+            Debug.LogError($"ServerBrowser: Invalid server index {serverIndex}. Available servers: {servers.Count}");
+            ShowStatusMessage("Error: Invalid server selection");
+            return;
+        }
+        
         // Show status
         ShowStatusMessage("Joining server...");
         
-        Debug.Log($"ServerBrowser: Attempting to join server at index {serverIndex}");
+        Debug.Log($"ServerBrowser: Attempting to join server at index {serverIndex}: {servers[serverIndex].serverName} at {servers[serverIndex].ipAddress}:{servers[serverIndex].port}");
         
         try
         {
@@ -745,6 +851,55 @@ public class ServerBrowser : MonoBehaviour
         foreach (Transform child in transform)
         {
             PrintUIHierarchy(child, depth + 1);
+        }
+    }
+    
+    // Check and fix all server entry buttons to ensure they work
+    private void EnsureServerEntryButtonsWork()
+    {
+        Debug.Log($"ServerBrowser: Checking {serverEntries.Count} server entry buttons");
+        
+        for (int i = 0; i < serverEntries.Count; i++)
+        {
+            GameObject entry = serverEntries[i];
+            if (entry == null) continue;
+            
+            // Try to get the button component
+            Button button = entry.GetComponent<Button>();
+            if (button == null)
+            {
+                // Try to find a button in the children
+                button = entry.GetComponentInChildren<Button>(true);
+                if (button == null)
+                {
+                    Debug.LogError($"ServerBrowser: Server entry {i} has no Button component! Adding one.");
+                    button = entry.AddComponent<Button>();
+                    // Set up a color transition
+                    ColorBlock colors = button.colors;
+                    colors.normalColor = Color.white;
+                    colors.highlightedColor = new Color(0.9f, 0.9f, 1f);
+                    colors.pressedColor = new Color(0.8f, 0.8f, 0.9f);
+                    button.colors = colors;
+                }
+            }
+            
+            // Check if button has listeners
+            int listenerCount = 0;
+            
+            // We can't directly check the listeners count, so we'll add a temporary one and remove it
+            UnityAction tempAction = () => { listenerCount++; };
+            button.onClick.AddListener(tempAction);
+            button.onClick.RemoveListener(tempAction);
+            
+            if (listenerCount == 0)
+            {
+                Debug.LogWarning($"ServerBrowser: Button for server entry {i} has no click listeners. Adding one.");
+                int serverIdx = i; // Capture index for the lambda
+                button.onClick.AddListener(() => {
+                    Debug.Log($"ServerBrowser: Clicked on server entry {serverIdx}");
+                    OnJoinButtonClicked(serverIdx);
+                });
+            }
         }
     }
 }
