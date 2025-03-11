@@ -131,8 +131,8 @@ public class PlayerSpawner : MonoBehaviour
         Vector3 spawnPosition = spawnPoint != null ? spawnPoint.position : Vector3.zero;
         Quaternion spawnRotation = spawnPoint != null ? spawnPoint.rotation : Quaternion.identity;
         
-        // Get the selected character prefab from NetworkManagerUI
-        GameObject characterPrefab = NetworkManagerUI.SelectedCharacterPrefab;
+        // Get the selected character prefab from MatchmakingManager
+        GameObject characterPrefab = MatchmakingManager.SelectedCharacterPrefab;
         
         // Fallback to default prefab if no selection
         if (characterPrefab == null)
