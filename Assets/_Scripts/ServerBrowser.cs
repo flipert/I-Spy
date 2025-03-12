@@ -30,6 +30,10 @@ public class ServerBrowser : MonoBehaviour
     private MatchmakingManager matchmakingManager;
     private List<GameObject> serverEntries = new List<GameObject>();
     private Coroutine statusMessageCoroutine;
+    private bool userInitiatedClose = false;
+    
+    // Add a private flag to track if a refresh is needed when enabled
+    private bool needsRefreshOnNextEnable = false;
     
     private void Awake()
     {
@@ -210,6 +214,28 @@ public class ServerBrowser : MonoBehaviour
         }
     }
     
+    /// <summary>
+    /// Safely starts a coroutine only if the GameObject is active
+    /// </summary>
+    private Coroutine SafeStartCoroutine(IEnumerator routine, string routineName = "")
+    {
+        if (gameObject == null || !gameObject.activeInHierarchy)
+        {
+            Debug.LogWarning($"ServerBrowser: Cannot start coroutine '{routineName}' - GameObject is inactive or null");
+            return null;
+        }
+        
+        try
+        {
+            return StartCoroutine(routine);
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError($"ServerBrowser: Error starting coroutine '{routineName}': {ex.Message}");
+            return null;
+        }
+    }
+    
     private void OnEnable()
     {
         // Make sure we have a reference to MatchmakingManager
@@ -242,9 +268,20 @@ public class ServerBrowser : MonoBehaviour
         // Always clear the server list when this panel is enabled
         ClearServerList();
         
-        // Add a small delay before refreshing the server list
-        // This avoids issues with test entries showing up temporarily
-        StartCoroutine(DelayedRefresh());
+        // Check if we were asked to refresh while inactive
+        if (needsRefreshOnNextEnable)
+        {
+            Debug.Log("ServerBrowser: Performing delayed refresh requested while inactive");
+            needsRefreshOnNextEnable = false;
+            // Add a small delay before refreshing the server list
+            SafeStartCoroutine(DelayedRefresh(), "DelayedRefresh");
+        }
+        else
+        {
+            // Add a small delay before refreshing the server list
+            // This avoids issues with test entries showing up temporarily
+            SafeStartCoroutine(DelayedRefresh(), "DelayedRefresh");
+        }
     }
     
     private IEnumerator DelayedRefresh()
@@ -283,17 +320,39 @@ public class ServerBrowser : MonoBehaviour
     
     private void OnDisable()
     {
-        // Unsubscribe from events when disabled
-        if (matchmakingManager != null)
+        // If this wasn't user-initiated, we might be in a scene transition or premature disable
+        // In that case, we should try to preserve our server list/discovery status
+        if (!userInitiatedClose && matchmakingManager != null)
         {
+            // Log the fact that this might be unintentional
+            Debug.LogWarning("ServerBrowser: OnDisable called without user initiating close. " +
+                            "This might cause the server list to disappear prematurely.");
+            
+            // Don't stop discovery if being disabled externally (like scene transitions)
+            // Only unsubscribe from events to prevent memory leaks
             matchmakingManager.OnServerListUpdated -= OnServerListUpdated;
             matchmakingManager.OnCreateServerSuccess -= OnCreateServerSuccess;
             matchmakingManager.OnCreateServerFailed -= OnCreateServerFailed;
             matchmakingManager.OnJoinServerSuccess -= OnJoinServerSuccess;
             matchmakingManager.OnJoinServerFailed -= OnJoinServerFailed;
             
-            // Stop any ongoing server discovery when panel is closed
-            matchmakingManager.StopServerDiscovery();
+            // Don't call: matchmakingManager.StopServerDiscovery();
+        }
+        else
+        {
+            // This is a normal user-initiated close, handle normally
+            // Unsubscribe from events when disabled
+            if (matchmakingManager != null)
+            {
+                matchmakingManager.OnServerListUpdated -= OnServerListUpdated;
+                matchmakingManager.OnCreateServerSuccess -= OnCreateServerSuccess;
+                matchmakingManager.OnCreateServerFailed -= OnCreateServerFailed;
+                matchmakingManager.OnJoinServerSuccess -= OnJoinServerSuccess;
+                matchmakingManager.OnJoinServerFailed -= OnJoinServerFailed;
+                
+                // Stop any ongoing server discovery when panel is closed by user
+                matchmakingManager.StopServerDiscovery();
+            }
         }
         
         // Clean up the UI
@@ -337,7 +396,7 @@ public class ServerBrowser : MonoBehaviour
                 matchmakingManager.StopServerDiscovery();
                 
                 // Wait a moment before starting discovery again
-                StartCoroutine(DelayedStartDiscovery());
+                SafeStartCoroutine(DelayedStartDiscovery(), "DelayedStartDiscovery");
             }
             catch (Exception ex)
             {
@@ -367,6 +426,9 @@ public class ServerBrowser : MonoBehaviour
     // Back button handler
     private void OnBackButtonClicked()
     {
+        // Mark that the user is intentionally closing the browser
+        userInitiatedClose = true;
+        
         // Hide the server browser
         gameObject.SetActive(false);
         
@@ -390,24 +452,45 @@ public class ServerBrowser : MonoBehaviour
                 Debug.LogWarning("ServerBrowser: Back button pressed but mainMenuPanel is not assigned and MainMenuUI not found!");
             }
         }
+        
+        // Reset the flag after navigation
+        userInitiatedClose = false;
     }
     
     // Handle server list update event
     private void OnServerListUpdated(List<MatchmakingManager.ServerInfo> servers)
     {
+        // First check if we're still active - if not, just cache the data but don't update UI
+        if (!gameObject.activeInHierarchy)
+        {
+            Debug.LogWarning("ServerBrowser: OnServerListUpdated called while GameObject inactive. Skipping UI update.");
+            // Cache the server list for when we become active again
+            if (servers != null && servers.Count > 0)
+            {
+                Debug.Log($"ServerBrowser: Caching {servers.Count} servers for later display");
+                needsRefreshOnNextEnable = true;
+            }
+            return;
+        }
+        
         // Add robust null checks and detailed logging
         if (servers != null)
         {
-            Debug.Log($"ServerBrowser: OnServerListUpdated called with {servers.Count} servers");
+            Debug.Log($"********** SERVER LIST UPDATED: {servers.Count} SERVERS FOUND **********");
             
             if (servers.Count > 0)
             {
-                // Log details of the first server to help with debugging
-                var firstServer = servers[0];
-                Debug.Log($"ServerBrowser: First server details - Name: {firstServer.serverName}, " +
-                          $"IP: {firstServer.ipAddress}, Port: {firstServer.port}, " +
-                          $"Players: {firstServer.currentPlayers}/{firstServer.maxPlayers}, " +
-                          $"In Game: {firstServer.inGame}");
+                // Log details of all servers to help with debugging
+                for (int i = 0; i < servers.Count; i++)
+                {
+                    var server = servers[i];
+                    Debug.Log($"********** SERVER #{i} DETAILS **********\n" +
+                              $"Name: {server.serverName}\n" +
+                              $"IP: {server.ipAddress}\n" +
+                              $"Port: {server.port}\n" +
+                              $"Players: {server.currentPlayers}/{server.maxPlayers}\n" +
+                              $"In Game: {server.inGame}");
+                }
             }
         }
         else
@@ -444,12 +527,15 @@ public class ServerBrowser : MonoBehaviour
             
             if (servers.Count == 0)
             {
+                Debug.Log("********** NO SERVERS FOUND **********");
                 ShowStatusMessage("No servers found. Make sure a server is running and try again.");
                 return;
             }
             
             // Hide status text if we have servers
             ClearStatusMessage();
+            
+            Debug.Log($"********** ATTEMPTING TO CREATE {servers.Count} SERVER ENTRIES **********");
             
             // Create server entries
             for (int i = 0; i < servers.Count; i++)
@@ -462,12 +548,13 @@ public class ServerBrowser : MonoBehaviour
                 
                 try
                 {
+                    Debug.Log($"********** CREATING SERVER ENTRY #{i}: {servers[i].serverName} **********");
                     CreateServerEntry(servers[i], i);
                     
                     // Verify entry was created
                     if (i < serverEntries.Count && serverEntries[i] != null)
                     {
-                        Debug.Log($"ServerBrowser: Successfully created entry for server: {servers[i].serverName}");
+                        Debug.Log($"********** SERVER ENTRY #{i} SUCCESSFULLY CREATED **********");
                     }
                     else
                     {
@@ -481,7 +568,8 @@ public class ServerBrowser : MonoBehaviour
             }
             
             // Final verification
-            Debug.Log($"ServerBrowser: Created {serverEntries.Count} server entries out of {servers.Count} servers");
+            Debug.Log($"********** FINAL SERVER ENTRY COUNT: {serverEntries.Count} **********");
+            Debug.Log($"********** SERVER LIST CONTENT CHILD COUNT: {serverListContent.childCount} **********");
             
             // Check and fix all server entry buttons
             EnsureServerEntryButtonsWork();
@@ -539,16 +627,46 @@ public class ServerBrowser : MonoBehaviour
             return;
         }
         
-        Debug.Log($"ServerBrowser: Creating server entry for {server.serverName} ({server.ipAddress}:{server.port})");
+        Debug.Log($"********** CREATING UI ENTRY FOR SERVER: {server.serverName} ({server.ipAddress}:{server.port}) **********");
         
         // Instantiate the server entry prefab
         GameObject entry = Instantiate(serverEntryPrefab, serverListContent);
         entry.name = $"ServerEntry_{index}_{server.serverName}";
         
+        // Check that the entry was properly instantiated
+        if (entry == null)
+        {
+            Debug.LogError("ServerBrowser: Failed to instantiate server entry prefab!");
+            return;
+        }
+        
+        Debug.Log($"********** SERVER ENTRY INSTANTIATED: {entry.name} **********");
+        
         // Find components in the prefab
         TextMeshProUGUI serverNameText = entry.transform.Find("TXTServerName")?.GetComponent<TextMeshProUGUI>();
         TextMeshProUGUI playerCountText = entry.transform.Find("TXTPlayerCount")?.GetComponent<TextMeshProUGUI>();
         TextMeshProUGUI pingText = entry.transform.Find("TXTPing")?.GetComponent<TextMeshProUGUI>();
+        
+        // Log component references for debugging
+        Debug.Log($"ServerBrowser: Server entry components - " +
+                  $"Name: {(serverNameText != null ? "Found" : "Missing")}, " +
+                  $"PlayerCount: {(playerCountText != null ? "Found" : "Missing")}, " +
+                  $"Ping: {(pingText != null ? "Found" : "Missing")}");
+        
+        // If specific components aren't found, try to locate them by different names
+        if (serverNameText == null)
+        {
+            // Try to find any text component with "name" in it
+            foreach (TextMeshProUGUI text in entry.GetComponentsInChildren<TextMeshProUGUI>())
+            {
+                if (text.name.ToLower().Contains("name") || text.name.ToLower().Contains("server"))
+                {
+                    serverNameText = text;
+                    Debug.Log($"ServerBrowser: Found alternative server name text: {text.name}");
+                    break;
+                }
+            }
+        }
         
         // Look for join button - either a specific button or the entry itself
         Button joinButton = entry.transform.Find("BTNJoin")?.GetComponent<Button>();
@@ -564,6 +682,7 @@ public class ServerBrowser : MonoBehaviour
         if (serverNameText != null)
         {
             serverNameText.text = server.serverName;
+            Debug.Log($"ServerBrowser: Set server name text to: {server.serverName}");
         }
         else
         {
@@ -572,6 +691,7 @@ public class ServerBrowser : MonoBehaviour
             if (texts.Length > 0)
             {
                 texts[0].text = server.serverName;
+                Debug.Log($"ServerBrowser: Set first available text component to: {server.serverName}");
             }
             else
             {
@@ -582,6 +702,7 @@ public class ServerBrowser : MonoBehaviour
         if (playerCountText != null)
         {
             playerCountText.text = $"{server.currentPlayers}/{server.maxPlayers}";
+            Debug.Log($"ServerBrowser: Set player count text to: {server.currentPlayers}/{server.maxPlayers}");
         }
         
         if (pingText != null)
@@ -611,8 +732,13 @@ public class ServerBrowser : MonoBehaviour
             Debug.LogError("ServerBrowser: No Button component found on server entry! User won't be able to join this server.");
         }
         
+        // Make sure the entry is active and visible
+        entry.SetActive(true);
+        
         // Add to our list for tracking
         serverEntries.Add(entry);
+        
+        Debug.Log($"********** SERVER ENTRY #{index} ADDED TO LIST, TOTAL ENTRIES: {serverEntries.Count} **********");
     }
     
     // Join button click handler
@@ -655,11 +781,18 @@ public class ServerBrowser : MonoBehaviour
         
         try
         {
+            // Set the user-initiated flag so that OnDisable won't prematurely stop discovery
+            // if this GameObject gets disabled during scene transitions
+            userInitiatedClose = true;
+            
             // Join the server
             matchmakingManager.JoinServer(serverIndex);
         }
         catch (Exception ex)
         {
+            // Reset the flag if there was an error
+            userInitiatedClose = false;
+            
             Debug.LogError($"ServerBrowser: Error joining server: {ex.Message}");
             ShowStatusMessage($"Error joining server: {ex.Message}");
         }
@@ -679,10 +812,14 @@ public class ServerBrowser : MonoBehaviour
     private void OnJoinServerSuccess()
     {
         ShowStatusMessage("Joined server successfully!");
+        // Keep the userInitiatedClose flag set to true since we're intentionally
+        // changing scenes or disabling this GameObject during connection
     }
     
     private void OnJoinServerFailed(string errorMessage)
     {
+        // Reset the userInitiatedClose flag since we're staying in the browser
+        userInitiatedClose = false;
         ShowStatusMessage($"Failed to join server: {errorMessage}");
     }
     
@@ -692,6 +829,13 @@ public class ServerBrowser : MonoBehaviour
         if (statusText == null)
             return;
             
+        // Make sure the GameObject is active before starting a coroutine
+        if (!gameObject.activeInHierarchy)
+        {
+            Debug.LogWarning($"ServerBrowser: Cannot show status message '{message}' - GameObject is inactive");
+            return;
+        }
+            
         // Cancel any existing status message coroutine
         if (statusMessageCoroutine != null)
             StopCoroutine(statusMessageCoroutine);
@@ -700,7 +844,7 @@ public class ServerBrowser : MonoBehaviour
         statusText.text = message;
         
         // Start the coroutine to clear the message after a delay
-        statusMessageCoroutine = StartCoroutine(ClearStatusMessageAfterDelay());
+        statusMessageCoroutine = SafeStartCoroutine(ClearStatusMessageAfterDelay(), "ClearStatusMessageAfterDelay");
     }
     
     // Clear the status message after a delay
@@ -726,6 +870,14 @@ public class ServerBrowser : MonoBehaviour
     {
         Debug.Log("ServerBrowser: Clearing all server data");
         
+        // Check if we're active - if not, set a flag to refresh when we become active
+        if (!gameObject.activeInHierarchy)
+        {
+            Debug.Log("ServerBrowser: GameObject is inactive during ClearServerData call. Will refresh when enabled.");
+            needsRefreshOnNextEnable = true;
+            return;
+        }
+        
         // Stop discovery first
         if (matchmakingManager != null)
         {
@@ -742,7 +894,11 @@ public class ServerBrowser : MonoBehaviour
         // Clear status
         if (statusText != null)
         {
-            ShowStatusMessage("Ready to search for servers...");
+            // Try showing a status message, but only if we're active
+            if (gameObject.activeInHierarchy)
+            {
+                ShowStatusMessage("Ready to search for servers...");
+            }
         }
         
         // Remove any template entries
