@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
@@ -151,64 +152,106 @@ public class MainMenuUI : MonoBehaviour
             createMatchPanel.SetActive(false);
     }
     
+    /// <summary>
+    /// Safely starts a coroutine only if the GameObject is active
+    /// </summary>
+    private Coroutine SafeStartCoroutine(IEnumerator routine, string routineName = "")
+    {
+        if (gameObject == null || !gameObject.activeInHierarchy)
+        {
+            Debug.LogWarning($"MainMenuUI: Cannot start coroutine '{routineName}' - GameObject is inactive or null");
+            return null;
+        }
+        
+        try
+        {
+            return StartCoroutine(routine);
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError($"MainMenuUI: Error starting coroutine '{routineName}': {ex.Message}");
+            return null;
+        }
+    }
+    
     // Show the server browser panel
     public void ShowServerBrowserPanel()
     {
-        // Hide all panels first
         HideAllPanels();
         
-        // Find the ServerBrowser if we don't have a reference to it
+        // First make sure we have a reference to the server browser panel
+        if (serverBrowserPanel == null)
+        {
+            Debug.LogError("MainMenuUI: serverBrowserPanel is null! Cannot show server browser. Please assign this in the Inspector.");
+            return;
+        }
+        
+        // Activate the panel FIRST - this is important for initialization order
+        serverBrowserPanel.SetActive(true);
+        
+        // Now set up the server browser
         if (serverBrowser == null)
         {
-            // First check if it's attached to our ServerBrowserPanel
-            if (serverBrowserPanel != null)
+            serverBrowser = serverBrowserPanel.GetComponent<ServerBrowser>();
+            if (serverBrowser == null)
             {
-                serverBrowser = serverBrowserPanel.GetComponent<ServerBrowser>();
-                
-                // If not, look throughout the scene
-                if (serverBrowser == null)
-                {
-                    serverBrowser = FindObjectOfType<ServerBrowser>();
-                    
-                    // As a last resort, create a new one
-                    if (serverBrowser == null)
-                    {
-                        Debug.LogWarning("MainMenuUI: ServerBrowser component not found in scene! Creating one now, but this should be set up in the Editor.");
-                        EnsureServerBrowserExists();
-                    }
-                }
-            }
-            else
-            {
-                Debug.LogError("MainMenuUI: serverBrowserPanel is null! Cannot show server browser. Please assign this in the Inspector.");
+                Debug.LogError("MainMenuUI: ServerBrowser component not found on serverBrowserPanel!");
                 return;
             }
         }
         
-        // Reset the server browser completely to avoid stale data
-        if (serverBrowser != null)
+        Debug.Log("MainMenuUI: Reset ServerBrowser after showing panel");
+        
+        // Now that the panel is active, set up components and refresh
+        serverBrowser.SetupUIComponents();
+        
+        // Important: Start server discovery BEFORE clearing data
+        // This allows any previously discovered servers to be remembered
+        if (MatchmakingManager.Instance != null)
         {
-            Debug.Log("MainMenuUI: Reset ServerBrowser before showing panel");
-            
-            // Ensure UI components are properly set up
-            serverBrowser.SetupUIComponents();
-            
-            // Clear any existing data to ensure a fresh start
-            serverBrowser.ClearServerData();
-            
-            // Activate the panel
-            if (serverBrowserPanel != null)
-            {
-                serverBrowserPanel.SetActive(true);
-            }
-            else
-            {
-                Debug.LogError("MainMenuUI: serverBrowserPanel is null! Cannot show server browser.");
-            }
+            MatchmakingManager.Instance.StartServerDiscovery();
+        }
+        
+        // Make sure we're active before starting a coroutine
+        if (gameObject.activeInHierarchy && serverBrowserPanel.activeInHierarchy)
+        {
+            // Wait a bit before refreshing to make sure discovery is active
+            SafeStartCoroutine(DelayedRefreshServerBrowser(), "DelayedRefreshServerBrowser");
         }
         else
         {
-            Debug.LogError("MainMenuUI: Failed to find or create ServerBrowser component!");
+            Debug.LogWarning("MainMenuUI: Cannot start refresh coroutine - GameObject is inactive. Will refresh directly.");
+            // Immediate refresh instead of coroutine
+            if (serverBrowser != null && serverBrowser.gameObject.activeInHierarchy)
+            {
+                serverBrowser.RefreshServerList();
+            }
+        }
+    }
+    
+    private IEnumerator DelayedRefreshServerBrowser()
+    {
+        // Double-check if we're still active before yielding
+        if (!gameObject.activeInHierarchy)
+        {
+            Debug.LogWarning("MainMenuUI: GameObject became inactive during DelayedRefreshServerBrowser coroutine.");
+            yield break;
+        }
+        
+        // Wait a short moment to ensure the ServerBrowser is fully initialized
+        yield return new WaitForSeconds(0.5f);
+        
+        // Check again if we're still active
+        if (!gameObject.activeInHierarchy)
+        {
+            Debug.LogWarning("MainMenuUI: GameObject became inactive after waiting in DelayedRefreshServerBrowser.");
+            yield break;
+        }
+        
+        // Now refresh the server list
+        if (serverBrowser != null && serverBrowser.gameObject.activeInHierarchy)
+        {
+            serverBrowser.RefreshServerList();
         }
     }
     

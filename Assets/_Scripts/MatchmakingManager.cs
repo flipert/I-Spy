@@ -249,6 +249,9 @@ public class MatchmakingManager : MonoBehaviour
     
     private void OnDestroy()
     {
+        Debug.Log("MatchmakingManager: OnDestroy called");
+        
+        // First unsubscribe from all events to prevent callbacks during shutdown
         if (NetworkManager.Singleton != null)
         {
             NetworkManager.Singleton.OnClientConnectedCallback -= OnClientConnected;
@@ -271,28 +274,40 @@ public class MatchmakingManager : MonoBehaviour
             StopServerBroadcast();
         }
         
-        // Stop server discovery
+        // Check the state of the GameObject before proceeding with potentially problematic operations
+        bool isActive = gameObject.activeInHierarchy;
+        Debug.Log($"MatchmakingManager: GameObject is {(isActive ? "active" : "inactive")} during OnDestroy");
+        
+        // Safely stop server discovery (our improved method handles inactive GameObjects)
         StopServerDiscovery();
         
-        // Close any remaining network connections
-        if (broadcastClient != null)
+        // Perform final cleanup of network resources directly to avoid coroutine issues
+        try
         {
-            broadcastClient.Close();
-            broadcastClient = null;
+            // Close any remaining network connections
+            if (broadcastClient != null)
+            {
+                broadcastClient.Close();
+                broadcastClient = null;
+            }
+            
+            // Clean up discovery resources directly
+            CleanupDiscoveryResources();
+            
+            // Make absolutely sure the token is cancelled
+            if (cancellationTokenSource != null)
+            {
+                cancellationTokenSource.Cancel();
+                cancellationTokenSource.Dispose();
+                cancellationTokenSource = null;
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.LogWarning($"MatchmakingManager: Non-critical error during final cleanup: {ex.Message}");
         }
         
-        if (discoveryClient != null)
-        {
-            discoveryClient.Close();
-            discoveryClient = null;
-        }
-        
-        // Cancel any pending tasks
-        if (cancellationTokenSource != null)
-        {
-            cancellationTokenSource.Cancel();
-            cancellationTokenSource = null;
-        }
+        Debug.Log("MatchmakingManager: OnDestroy completed successfully");
     }
     
     #region Server Creation and Management
@@ -310,7 +325,15 @@ public class MatchmakingManager : MonoBehaviour
             Debug.LogWarning("MatchmakingManager: Already hosting a server. Shutting down before creating new one.");
             NetworkManager.Singleton.Shutdown();
             // Allow a short delay for proper cleanup
-            StartCoroutine(CreateServerAfterShutdown(serverName));
+            if (gameObject.activeInHierarchy)
+            {
+                SafeStartCoroutine(CreateServerAfterShutdown(serverName), "CreateServerAfterShutdown");
+            }
+            else
+            {
+                Debug.LogWarning("MatchmakingManager: GameObject inactive, can't use coroutine. Creating server immediately.");
+                CreateServerInternal(serverName);
+            }
             return;
         }
         
@@ -326,10 +349,12 @@ public class MatchmakingManager : MonoBehaviour
     
     private void CreateServerInternal(string serverName)
     {
+        Debug.Log("********** CREATING SERVER **********");
+        
         // Ensure NetworkManager exists
         if (NetworkManager.Singleton == null)
         {
-            Debug.LogError("MatchmakingManager: NetworkManager.Singleton is null! Cannot create server.");
+            Debug.LogError("********** ERROR: NetworkManager.Singleton is null! Cannot create server **********");
             OnCreateServerFailed?.Invoke("NetworkManager not found");
             return;
         }
@@ -360,7 +385,7 @@ public class MatchmakingManager : MonoBehaviour
         
         // Get our real local IP for discovery
         string localIP = GetLocalIPv4();
-        Debug.Log($"MatchmakingManager: Local IP is {localIP}. This needs to be accessible from the internet!");
+        Debug.Log($"********** LOCAL IP FOR SERVER: {localIP} **********");
         
         // Create the server info
         currentServerInfo = new ServerInfo(
@@ -371,6 +396,13 @@ public class MatchmakingManager : MonoBehaviour
             maxPlayersPerServer,
             false // Not in game yet
         );
+        
+        Debug.Log($"********** SERVER INFO CREATED **********\n" +
+                  $"Name: {currentServerInfo.serverName}\n" +
+                  $"IP: {currentServerInfo.ipAddress}\n" +
+                  $"Port: {currentServerInfo.port}\n" +
+                  $"Players: {currentServerInfo.currentPlayers}/{currentServerInfo.maxPlayers}\n" +
+                  $"In Game: {currentServerInfo.inGame}");
         
         // Clear any old server registrations
         CleanupOldServerRegistrations();
@@ -383,7 +415,7 @@ public class MatchmakingManager : MonoBehaviour
         NetworkManager.Singleton.OnServerStarted -= OnServerStarted;
         NetworkManager.Singleton.OnServerStarted += OnServerStarted;
         
-        Debug.Log($"MatchmakingManager: Starting host with server name: {serverName}");
+        Debug.Log($"********** STARTING HOST WITH SERVER NAME: {serverName} **********");
         
         try {
             // Start the server
@@ -392,11 +424,11 @@ public class MatchmakingManager : MonoBehaviour
             // Register the server so it can be discovered
             RegisterServer();
             
-            Debug.Log($"MatchmakingManager: Created server: {serverName}");
+            Debug.Log($"********** SERVER CREATED SUCCESSFULLY: {serverName} **********");
             OnCreateServerSuccess?.Invoke();
         }
         catch (Exception e) {
-            Debug.LogError($"MatchmakingManager: Failed to start host: {e.Message}");
+            Debug.LogError($"********** FAILED TO START HOST: {e.Message} **********");
             OnCreateServerFailed?.Invoke(e.Message);
         }
     }
@@ -418,16 +450,23 @@ public class MatchmakingManager : MonoBehaviour
         return "127.0.0.1";
     }
     
+    /// <summary>
+    /// Register this server with the matchmaking system
+    /// </summary>
     private void RegisterServer()
     {
         try
         {
-            Debug.Log($"MatchmakingManager: Registering server: {currentServerInfo.serverName} at {currentServerInfo.ipAddress}:{currentServerInfo.port}");
+            Debug.Log($"********** REGISTERING SERVER FOR DISCOVERY **********\n" +
+                      $"Server Name: {currentServerInfo.serverName}\n" +
+                      $"IP: {currentServerInfo.ipAddress}\n" +
+                      $"Port: {currentServerInfo.port}");
             
             // Add our server to the list of available servers
             if (!availableServers.Contains(currentServerInfo))
             {
                 availableServers.Add(currentServerInfo);
+                Debug.Log("********** SERVER ADDED TO AVAILABLE SERVERS LIST **********");
             }
             
             // Store server info in PlayerPrefs for local discovery
@@ -457,23 +496,23 @@ public class MatchmakingManager : MonoBehaviour
             string jsonData = JsonUtility.ToJson(currentServerInfo);
             File.WriteAllText(filePath, jsonData);
             
-            Debug.Log($"MatchmakingManager: Server info written to {filePath}");
+            Debug.Log($"********** SERVER INFO WRITTEN TO FILE: {filePath} **********");
             
             // Start broadcasting server presence on the network
             StartServerBroadcast();
             
             // Debug output the PlayerPrefs values after setting them
-            Debug.Log($"MatchmakingManager: Verified PlayerPrefs after registration: " +
-                      $"Name={PlayerPrefs.GetString("LocalServerName")} " +
-                      $"IP={PlayerPrefs.GetString("LocalServerIP")} " +
-                      $"Port={PlayerPrefs.GetInt("LocalServerPort")}");
+            Debug.Log($"********** PLAYERPREFS VERIFICATION **********\n" +
+                      $"Name: {PlayerPrefs.GetString("LocalServerName")}\n" +
+                      $"IP: {PlayerPrefs.GetString("LocalServerIP")}\n" +
+                      $"Port: {PlayerPrefs.GetInt("LocalServerPort")}");
             
             // Notify success
             OnCreateServerSuccess?.Invoke();
         }
         catch (Exception ex)
         {
-            Debug.LogError($"MatchmakingManager: Error registering server: {ex.Message}");
+            Debug.LogError($"********** ERROR REGISTERING SERVER: {ex.Message} **********");
             OnCreateServerFailed?.Invoke("Error registering server: " + ex.Message);
         }
     }
@@ -483,8 +522,11 @@ public class MatchmakingManager : MonoBehaviour
     /// </summary>
     private void StartServerBroadcast()
     {
+        Debug.Log("********** STARTING SERVER BROADCAST **********");
+        
         if (broadcastClient != null)
         {
+            Debug.Log("********** STOPPING PREVIOUS BROADCAST BEFORE STARTING NEW ONE **********");
             StopServerBroadcast();
         }
         
@@ -508,13 +550,26 @@ public class MatchmakingManager : MonoBehaviour
             }
             
             // Start a coroutine to broadcast regularly
-            StartCoroutine(BroadcastServerInfoCoroutine());
-            
-            Debug.Log("MatchmakingManager: Started server broadcast");
+            if (gameObject.activeInHierarchy)
+            {
+                Coroutine bc = SafeStartCoroutine(BroadcastServerInfoCoroutine(), "BroadcastServerInfoCoroutine");
+                if (bc != null)
+                {
+                    Debug.Log("********** SERVER BROADCAST COROUTINE STARTED SUCCESSFULLY **********");
+                }
+                else
+                {
+                    Debug.LogError("********** SERVER BROADCAST COROUTINE FAILED TO START **********");
+                }
+            }
+            else
+            {
+                Debug.LogError("********** CANNOT START BROADCAST - GAMEOBJECT IS INACTIVE **********");
+            }
         }
         catch (Exception ex)
         {
-            Debug.LogError($"MatchmakingManager: Error starting server broadcast: {ex.Message}");
+            Debug.LogError($"********** ERROR STARTING SERVER BROADCAST: {ex.Message} **********");
         }
     }
     
@@ -537,10 +592,15 @@ public class MatchmakingManager : MonoBehaviour
     /// </summary>
     private IEnumerator BroadcastServerInfoCoroutine()
     {
+        Debug.Log("********** BROADCAST COROUTINE STARTED **********");
+        int broadcastCount = 0;
+        
         while (true)
         {
             try
             {
+                broadcastCount++;
+                
                 // Prepare server info to broadcast
                 string jsonData = JsonUtility.ToJson(currentServerInfo);
                 byte[] data = Encoding.UTF8.GetBytes(jsonData);
@@ -548,11 +608,14 @@ public class MatchmakingManager : MonoBehaviour
                 // Try different broadcast methods
                 TryBroadcastToNetwork(data);
                 
-                Debug.Log($"MatchmakingManager: Broadcast server info: {currentServerInfo.serverName} at {currentServerInfo.ipAddress}:{currentServerInfo.port}");
+                Debug.Log($"********** BROADCAST #{broadcastCount} SENT **********\n" +
+                          $"Server: {currentServerInfo.serverName}\n" +
+                          $"IP: {currentServerInfo.ipAddress}\n" +
+                          $"Port: {currentServerInfo.port}");
             }
             catch (Exception ex)
             {
-                Debug.LogError($"MatchmakingManager: Error broadcasting server info: {ex.Message}");
+                Debug.LogError($"********** ERROR BROADCASTING SERVER INFO: {ex.Message} **********");
             }
             
             // Wait before broadcasting again
@@ -565,114 +628,153 @@ public class MatchmakingManager : MonoBehaviour
     /// </summary>
     private void TryBroadcastToNetwork(byte[] data)
     {
-        // LOCAL NETWORK BROADCASTING:
-        // First, try standard LAN broadcasting methods
+        Debug.Log("********** ATTEMPTING UDP BROADCAST **********");
         
-        // Method 1: General broadcast (works on simple networks)
-        try
+        // This will track if any broadcast method succeeded
+        bool anyBroadcastSucceeded = false;
+        
+        // METHOD 1: Direct broadcast to localhost (always works for testing on the same machine)
+        try 
         {
-            IPEndPoint endpoint = new IPEndPoint(IPAddress.Broadcast, discoveryPort);
-            broadcastClient.Send(data, data.Length, endpoint);
-            Debug.Log("MatchmakingManager: Local broadcast sent");
+            if (broadcastClient != null)
+            {
+                IPEndPoint localEndPoint = new IPEndPoint(IPAddress.Parse("127.0.0.1"), discoveryPort);
+                int bytesSent = broadcastClient.Send(data, data.Length, localEndPoint);
+                Debug.Log($"********** LOCALHOST BROADCAST SENT: {bytesSent} BYTES TO 127.0.0.1:{discoveryPort} **********");
+                anyBroadcastSucceeded = true;
+            }
         }
         catch (Exception ex)
         {
-            Debug.LogWarning($"MatchmakingManager: General broadcast failed: {ex.Message}");
+            // Just log at warning level since this is just one method
+            Debug.LogWarning($"Localhost broadcast failed: {ex.Message}");
         }
         
-        // Method 2: Try local subnet broadcast
+        // METHOD 2: Try direct broadcast to local IP (works when client and server are on same machine)
         try
         {
-            // Get local IP and create subnet broadcast
+            if (broadcastClient != null)
+            {
+                string localIP = GetLocalIPv4();
+                if (!string.IsNullOrEmpty(localIP))
+                {
+                    IPEndPoint directEndPoint = new IPEndPoint(IPAddress.Parse(localIP), discoveryPort);
+                    int bytesSent = broadcastClient.Send(data, data.Length, directEndPoint);
+                    Debug.Log($"********** DIRECT BROADCAST SENT: {bytesSent} BYTES TO {localIP}:{discoveryPort} **********");
+                    anyBroadcastSucceeded = true;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.LogWarning($"Direct IP broadcast failed: {ex.Message}");
+        }
+        
+        // METHOD 3: Traditional broadcast addresses (works on many networks but may fail on some)
+        try
+        {
+            if (broadcastClient != null)
+            {
+                // Try to broadcast to all-network broadcast address
+                try 
+                {
+                    IPEndPoint broadcastEndPoint = new IPEndPoint(IPAddress.Broadcast, discoveryPort);
+                    int bytesSent = broadcastClient.Send(data, data.Length, broadcastEndPoint);
+                    Debug.Log($"********** ALL-NETWORK BROADCAST SENT: {bytesSent} BYTES TO 255.255.255.255:{discoveryPort} **********");
+                    anyBroadcastSucceeded = true;
+                }
+                catch (Exception ex)
+                {
+                    // This often fails with "No route to host" on modern networks, so just log as info
+                    Debug.Log($"All-network broadcast failed (common on modern networks): {ex.Message}");
+                }
+                
+                // Try subnet-directed broadcast
+                try
+                {
+                    string localIP = GetLocalIPv4();
+                    if (!string.IsNullOrEmpty(localIP) && localIP != "127.0.0.1")
+                    {
+                        string[] parts = localIP.Split('.');
+                        if (parts.Length == 4)
+                        {
+                            // Create subnet broadcast address (e.g., 192.168.1.255)
+                            string broadcastIP = $"{parts[0]}.{parts[1]}.{parts[2]}.255";
+                            IPEndPoint subnetEndpoint = new IPEndPoint(IPAddress.Parse(broadcastIP), discoveryPort);
+                            int bytesSent = broadcastClient.Send(data, data.Length, subnetEndpoint);
+                            Debug.Log($"********** SUBNET BROADCAST SENT: {bytesSent} BYTES TO {broadcastIP}:{discoveryPort} **********");
+                            anyBroadcastSucceeded = true;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"Subnet broadcast failed: {ex.Message}");
+                }
+            }
+            else
+            {
+                Debug.LogError("********** BROADCAST CLIENT IS NULL! CANNOT SEND BROADCAST **********");
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.LogWarning($"Traditional broadcast methods failed: {ex.Message}");
+        }
+        
+        // METHOD 4: Targeted broadcasts to common local addresses
+        // This is more reliable on modern networks
+        try 
+        {
+            // Send to common local IPs directly
             string localIP = GetLocalIPv4();
-            if (!string.IsNullOrEmpty(localIP) && localIP != "127.0.0.1")
+            if (!string.IsNullOrEmpty(localIP) && localIP != "127.0.0.1" && broadcastClient != null)
             {
                 string[] parts = localIP.Split('.');
                 if (parts.Length == 4)
                 {
-                    // Create subnet broadcast address (e.g., 192.168.1.255)
-                    string broadcastIP = $"{parts[0]}.{parts[1]}.{parts[2]}.255";
-                    IPEndPoint subnetEndpoint = new IPEndPoint(IPAddress.Parse(broadcastIP), discoveryPort);
-                    broadcastClient.Send(data, data.Length, subnetEndpoint);
-                    Debug.Log($"MatchmakingManager: Subnet broadcast sent to {broadcastIP}");
+                    // Send to a few common addresses in the subnet
+                    string[] commonHosts = { "1", "100", "101", "102", "150", "200", "254" };
+                    
+                    foreach (string host in commonHosts)
+                    {
+                        try 
+                        {
+                            string targetIP = $"{parts[0]}.{parts[1]}.{parts[2]}.{host}";
+                            IPEndPoint targetEndpoint = new IPEndPoint(IPAddress.Parse(targetIP), discoveryPort);
+                            int bytesSent = broadcastClient.Send(data, data.Length, targetEndpoint);
+                            Debug.Log($"********** TARGET BROADCAST SENT: {bytesSent} BYTES TO {targetIP}:{discoveryPort} **********");
+                            anyBroadcastSucceeded = true;
+                        }
+                        catch (Exception ex)
+                        {
+                            // No need to log every failure in targeted broadcasting
+                            // This is expected for IPs that don't exist
+                        }
+                    }
                 }
             }
         }
         catch (Exception ex)
         {
-            Debug.LogWarning($"MatchmakingManager: Subnet broadcast failed: {ex.Message}");
+            Debug.LogWarning($"Targeted broadcast failed: {ex.Message}");
         }
         
-        // INTERNET DISCOVERY:
-        
-        // Method 3: Use common gateway addresses - this helps discovery in some network configurations
-        try {
-            // Try sending to common default gateway IPs
-            string[] commonGateways = new string[] {
-                "192.168.0.1", "192.168.1.1", "192.168.2.1", "10.0.0.1", "10.0.0.138"
-            };
-            
-            foreach (string gateway in commonGateways) {
-                try {
-                    IPEndPoint gatewayEndpoint = new IPEndPoint(IPAddress.Parse(gateway), discoveryPort);
-                    broadcastClient.Send(data, data.Length, gatewayEndpoint);
-                }
-                catch {
-                    // Ignore individual gateway failures
-                }
-            }
-            
-            // Try to determine and use the actual gateway
-            string actualGateway = GetDefaultGatewayIP();
-            if (!string.IsNullOrEmpty(actualGateway)) {
-                IPEndPoint gatewayEndpoint = new IPEndPoint(IPAddress.Parse(actualGateway), discoveryPort);
-                broadcastClient.Send(data, data.Length, gatewayEndpoint);
-                Debug.Log($"MatchmakingManager: Sent to gateway: {actualGateway}");
-            }
+        if (anyBroadcastSucceeded)
+        {
+            Debug.Log("********** AT LEAST ONE BROADCAST METHOD SUCCEEDED **********");
         }
-        catch (Exception ex) {
-            Debug.LogWarning($"MatchmakingManager: Gateway broadcast failed: {ex.Message}");
-        }
-        
-        // Method 4: External IP Address Discovery (UDP Hole Punching technique)
-        try {
-            // Send to a range of potential IP addresses in the local network
-            // This effectively "punches" through NAT in some configurations
-            string localIP = GetLocalIPv4();
-            if (!string.IsNullOrEmpty(localIP) && localIP != "127.0.0.1") {
-                string[] parts = localIP.Split('.');
-                if (parts.Length == 4) {
-                    // Try sending to a range of IPs in the same subnet
-                    for (int i = 1; i < 255; i++) {
-                        // Don't send too many packets to avoid flooding
-                        if (i % 25 == 0) { // Only try IPs at intervals to reduce traffic
-                            string targetIP = $"{parts[0]}.{parts[1]}.{parts[2]}.{i}";
-                            try {
-                                IPEndPoint targetEndpoint = new IPEndPoint(IPAddress.Parse(targetIP), discoveryPort);
-                                broadcastClient.Send(data, data.Length, targetEndpoint);
-                            }
-                            catch {
-                                // Ignore individual failures
-                            }
-                        }
-                    }
-                    Debug.Log("MatchmakingManager: Sent discovery packets to multiple IPs in subnet");
-                }
-            }
-        }
-        catch (Exception ex) {
-            Debug.LogWarning($"MatchmakingManager: Network range broadcast failed: {ex.Message}");
+        else
+        {
+            Debug.LogError("********** ALL BROADCAST METHODS FAILED! **********");
         }
         
         // Log networking information - this helps with troubleshooting
         string externalIP = GetExternalIP();
         Debug.Log("==== SERVER NETWORK INFO ====");
         Debug.Log($"Local IP: {GetLocalIPv4()}");
-        Debug.Log($"Possible Public IP: {(string.IsNullOrEmpty(externalIP) ? "Unknown (check whatismyip.com)" : externalIP)}");
+        Debug.Log($"Possible Public IP: {(string.IsNullOrEmpty(externalIP) ? "Unknown" : externalIP)}");
         Debug.Log($"Discovery Port: {discoveryPort}, Game Port: {currentServerInfo.port}");
-        Debug.Log("==== IMPORTANT ====");
-        Debug.Log("For internet play, ensure ports 7777 and 47777 (UDP/TCP) are forwarded on your router");
-        Debug.Log("====================================");
     }
     
     // Try to get the external IP using a simple HTTP request
@@ -764,33 +866,32 @@ public class MatchmakingManager : MonoBehaviour
     /// </summary>
     public void StartServerDiscovery()
     {
-        // Don't start discovery if we're already in a game session
-        if (IsServer || IsHost)
+        Debug.Log("********** STARTING SERVER DISCOVERY **********");
+        
+        if (isRefreshingServers)
         {
-            Debug.Log("MatchmakingManager: Won't start discovery while hosting a server");
-            return;
+            Debug.Log("MatchmakingManager: Already discovering servers, restarting discovery");
+            StopServerDiscovery();
         }
         
-        // Stop any existing discovery process first
-        StopServerDiscovery();
-        
-        // Clear the old server data to avoid showing stale entries
+        // Reset server list
         discoveredServers.Clear();
         
-        Debug.Log("MatchmakingManager: Starting server discovery process");
-        
-        // Start UDP discovery for both LAN and potential internet servers
-        StartUdpDiscovery();
-        
-        // Start the coroutine for periodic server list refresh
+        // Start discovery in the background
         isRefreshingServers = true;
-        serverDiscoveryCoroutine = StartCoroutine(RefreshServersCoroutine());
         
-        // Force an immediate refresh
-        RefreshServerList();
+        // Debug current status before starting discovery
+        Debug.Log($"********** SERVER DISCOVERY STATUS **********\n" +
+                  $"Is Client: {IsClient}\n" +
+                  $"Is Server: {IsServer}\n" +
+                  $"Is Discovering: {isRefreshingServers}\n" +
+                  $"Discover Thread Active: {(serverDiscoveryCoroutine != null)}\n" +
+                  $"Servers Count: {discoveredServers.Count}");
         
-        // Display helpful networking information
-        DisplayNetworkInfo();
+        // Start discovery in a separate thread to avoid blocking the main thread
+        serverDiscoveryCoroutine = SafeStartCoroutine(RefreshServersCoroutine(), "RefreshServersCoroutine");
+        
+        Debug.Log("********** SERVER DISCOVERY THREAD STARTED **********");
     }
     
     /// <summary>
@@ -843,6 +944,8 @@ public class MatchmakingManager : MonoBehaviour
     /// </summary>
     private void StartUdpDiscovery()
     {
+        Debug.Log("********** STARTING UDP DISCOVERY **********");
+        
         // Stop any existing discovery
         StopUdpDiscovery();
         
@@ -851,54 +954,89 @@ public class MatchmakingManager : MonoBehaviour
             // Create cancellation token for async operations
             cancellationTokenSource = new CancellationTokenSource();
             
-            // Create and configure UDP client for listening
+            // Track if we successfully initialized a discovery client
+            bool clientInitialized = false;
+            
+            // METHOD 1: Try standard binding method first
             try
             {
                 discoveryClient = new UdpClient();
                 
-                // Configure to reuse address (important for multiple clients on same machine)
+                // Set socket options for maximum compatibility
                 discoveryClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-                
-                // Enable broadcast capability
                 discoveryClient.EnableBroadcast = true;
-                
-                // Increase receive buffer size for better packet reception
                 discoveryClient.Client.ReceiveBufferSize = 65536;
                 
                 // Bind to the discovery port
                 discoveryClient.Client.Bind(new IPEndPoint(IPAddress.Any, discoveryPort));
                 
-                Debug.Log($"MatchmakingManager: Successfully bound UDP client to port {discoveryPort}");
+                Debug.Log($"********** UDP CLIENT SUCCESSFULLY BOUND TO PORT {discoveryPort} (METHOD 1) **********");
+                clientInitialized = true;
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"MatchmakingManager: Error in primary binding, trying fallback: {ex.Message}");
+                Debug.LogWarning($"********** PRIMARY BINDING FAILED: {ex.Message}. TRYING FALLBACK METHOD... **********");
                 
-                // Fallback: If binding fails, try to create directly with port
+                // Clean up the failed client
                 if (discoveryClient != null)
                 {
                     discoveryClient.Close();
+                    discoveryClient = null;
                 }
                 
-                discoveryClient = new UdpClient(discoveryPort);
-                discoveryClient.EnableBroadcast = true;
+                // METHOD 2: Fallback to direct constructor binding
+                try
+                {
+                    discoveryClient = new UdpClient(discoveryPort);
+                    discoveryClient.EnableBroadcast = true;
+                    Debug.Log($"********** UDP CLIENT SUCCESSFULLY BOUND TO PORT {discoveryPort} (METHOD 2) **********");
+                    clientInitialized = true;
+                }
+                catch (Exception ex2)
+                {
+                    Debug.LogError($"********** FALLBACK BINDING ALSO FAILED: {ex2.Message} **********");
+                    
+                    // METHOD 3: Last resort - try with a different port
+                    try
+                    {
+                        // Try a different port as last resort (for testing only)
+                        int fallbackPort = discoveryPort + 1;
+                        discoveryClient = new UdpClient(fallbackPort);
+                        discoveryClient.EnableBroadcast = true;
+                        Debug.LogWarning($"********** USING FALLBACK PORT {fallbackPort} - THIS IS FOR TESTING ONLY **********");
+                        Debug.LogWarning($"********** SERVER AND CLIENT MUST BOTH USE PORT {fallbackPort} TO WORK **********");
+                        clientInitialized = true;
+                    }
+                    catch (Exception ex3)
+                    {
+                        Debug.LogError($"********** ALL UDP CLIENT CREATION METHODS FAILED: {ex3.Message} **********");
+                    }
+                }
             }
             
-            // Start listening for broadcasts asynchronously
-            isDiscoveryRunning = true;
-            Debug.Log("MatchmakingManager: Starting to listen for server broadcasts");
-            
-            // Better way to run the async method with cancellation support
-            _ = RunListenerWithErrorHandling(cancellationTokenSource.Token);
-            
-            // Try to send discovery packets to help with NAT traversal
-            SendClientDiscoveryRequests();
-            
-            Debug.Log("MatchmakingManager: UDP discovery started successfully");
+            // Only continue if we successfully initialized a client
+            if (clientInitialized && discoveryClient != null)
+            {
+                // Start listening for broadcasts asynchronously
+                isDiscoveryRunning = true;
+                Debug.Log("********** UDP DISCOVERY CLIENT CREATED, STARTING LISTENER **********");
+                
+                // Start the async listener
+                _ = RunListenerWithErrorHandling(cancellationTokenSource.Token);
+                
+                // Send discovery requests to actively find servers
+                SendClientDiscoveryRequests();
+                
+                Debug.Log("********** UDP DISCOVERY STARTED SUCCESSFULLY **********");
+            }
+            else
+            {
+                Debug.LogError("********** FAILED TO CREATE UDP DISCOVERY CLIENT **********");
+            }
         }
         catch (Exception ex)
         {
-            Debug.LogError($"MatchmakingManager: Error starting UDP discovery: {ex.Message}");
+            Debug.LogError($"********** UNHANDLED ERROR STARTING UDP DISCOVERY: {ex.Message} **********\n{ex.StackTrace}");
         }
     }
     
@@ -907,6 +1045,8 @@ public class MatchmakingManager : MonoBehaviour
     /// </summary>
     private void SendClientDiscoveryRequests()
     {
+        Debug.Log("********** SENDING CLIENT DISCOVERY REQUESTS **********");
+        
         try
         {
             // Create a temporary UDP client for sending requests
@@ -915,57 +1055,106 @@ public class MatchmakingManager : MonoBehaviour
                 // Enable broadcast
                 requestClient.EnableBroadcast = true;
                 
-                // Send a simple discovery request message
+                // Prepare discovery request message
                 byte[] requestData = Encoding.UTF8.GetBytes("DISCOVER_GAME_SERVER");
+                bool anySendSucceeded = false;
                 
-                // Try sending to broadcast
-                requestClient.Send(requestData, requestData.Length, new IPEndPoint(IPAddress.Broadcast, discoveryPort));
+                // METHOD 1: Try sending to localhost (always works if server is on same machine)
+                try
+                {
+                    IPEndPoint localEndPoint = new IPEndPoint(IPAddress.Parse("127.0.0.1"), discoveryPort);
+                    int bytesSent = requestClient.Send(requestData, requestData.Length, localEndPoint);
+                    Debug.Log($"********** DISCOVERY REQUEST SENT TO LOCALHOST: {bytesSent} bytes **********");
+                    anySendSucceeded = true;
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"Failed to send discovery request to localhost: {ex.Message}");
+                }
                 
-                // Try subnet broadcast
+                // METHOD 2: Try broadcast address - may or may not work depending on network
+                try
+                {
+                    IPEndPoint broadcastEndPoint = new IPEndPoint(IPAddress.Broadcast, discoveryPort);
+                    int bytesSent = requestClient.Send(requestData, requestData.Length, broadcastEndPoint);
+                    Debug.Log($"********** DISCOVERY REQUEST BROADCAST SENT: {bytesSent} bytes **********");
+                    anySendSucceeded = true;
+                }
+                catch (Exception ex)
+                {
+                    Debug.Log($"Failed to send discovery broadcast (common on modern networks): {ex.Message}");
+                }
+                
+                // METHOD 3: Try subnet broadcast - more reliable on modern networks
                 string localIP = GetLocalIPv4();
                 if (!string.IsNullOrEmpty(localIP) && localIP != "127.0.0.1")
                 {
                     string[] parts = localIP.Split('.');
                     if (parts.Length == 4)
                     {
-                        // Create subnet broadcast (e.g., 192.168.1.255)
-                        string broadcastIP = $"{parts[0]}.{parts[1]}.{parts[2]}.255";
-                        requestClient.Send(requestData, requestData.Length, 
-                            new IPEndPoint(IPAddress.Parse(broadcastIP), discoveryPort));
-                            
-                        // Try sending to several IPs in the subnet to improve discovery
-                        for (int i = 1; i < 255; i += 25) // Send to IPs at intervals
+                        // Try subnet broadcast (e.g., 192.168.1.255)
+                        try
                         {
-                            if (i == int.Parse(parts[3])) continue; // Skip our own IP
-                            
-                            string targetIP = $"{parts[0]}.{parts[1]}.{parts[2]}.{i}";
+                            string broadcastIP = $"{parts[0]}.{parts[1]}.{parts[2]}.255";
+                            IPEndPoint subnetEndPoint = new IPEndPoint(IPAddress.Parse(broadcastIP), discoveryPort);
+                            int bytesSent = requestClient.Send(requestData, requestData.Length, subnetEndPoint);
+                            Debug.Log($"********** DISCOVERY REQUEST SENT TO SUBNET: {bytesSent} bytes to {broadcastIP} **********");
+                            anySendSucceeded = true;
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.LogWarning($"Failed to send subnet discovery request: {ex.Message}");
+                        }
+                        
+                        // METHOD 4: Try sending to specific common IPs in the subnet
+                        string[] commonIPs = { "1", "100", "101", "102", "150", "200", "254" };
+                        foreach (string host in commonIPs)
+                        {
                             try
                             {
-                                requestClient.Send(requestData, requestData.Length, 
-                                    new IPEndPoint(IPAddress.Parse(targetIP), discoveryPort));
+                                string targetIP = $"{parts[0]}.{parts[1]}.{parts[2]}.{host}";
+                                // Skip our own IP to avoid confusion
+                                if (targetIP == localIP) continue;
+                                
+                                IPEndPoint targetEndPoint = new IPEndPoint(IPAddress.Parse(targetIP), discoveryPort);
+                                int bytesSent = requestClient.Send(requestData, requestData.Length, targetEndPoint);
+                                Debug.Log($"********** DISCOVERY REQUEST SENT TO: {targetIP} ({bytesSent} bytes) **********");
+                                anySendSucceeded = true;
                             }
                             catch
                             {
-                                // Ignore individual send failures
+                                // Ignore individual failures - expected for non-existent IPs
                             }
                         }
                     }
                 }
                 
-                // Try gateway
-                string gateway = GetDefaultGatewayIP();
-                if (!string.IsNullOrEmpty(gateway))
+                // Also try sending to self (important for testing)
+                try
                 {
-                    requestClient.Send(requestData, requestData.Length, 
-                        new IPEndPoint(IPAddress.Parse(gateway), discoveryPort));
+                    IPEndPoint selfEndPoint = new IPEndPoint(IPAddress.Parse(localIP), discoveryPort);
+                    int bytesSent = requestClient.Send(requestData, requestData.Length, selfEndPoint);
+                    Debug.Log($"********** DISCOVERY REQUEST SENT TO SELF: {localIP} ({bytesSent} bytes) **********");
+                    anySendSucceeded = true;
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"Failed to send discovery request to self: {ex.Message}");
                 }
                 
-                Debug.Log("MatchmakingManager: Sent discovery requests to multiple targets");
+                if (anySendSucceeded)
+                {
+                    Debug.Log("********** DISCOVERY REQUESTS SENT SUCCESSFULLY **********");
+                }
+                else
+                {
+                    Debug.LogError("********** ALL DISCOVERY REQUEST METHODS FAILED! **********");
+                }
             }
         }
         catch (Exception ex)
         {
-            Debug.LogWarning($"MatchmakingManager: Error sending discovery requests: {ex.Message}");
+            Debug.LogError($"********** ERROR SENDING DISCOVERY REQUESTS: {ex.Message} **********");
         }
     }
     
@@ -994,7 +1183,10 @@ public class MatchmakingManager : MonoBehaviour
     /// </summary>
     private async Task ListenForBroadcastsAsync(CancellationToken cancellationToken)
     {
-        Debug.Log("MatchmakingManager: Starting to listen for broadcasts");
+        Debug.Log("********** STARTING BROADCAST LISTENER **********");
+        
+        int packetsReceived = 0;
+        DateTime lastPacketTime = DateTime.Now;
         
         try
         {
@@ -1004,6 +1196,25 @@ public class MatchmakingManager : MonoBehaviour
                 UdpReceiveResult result;
                 try 
                 {
+                    // Make sure discovery client still exists
+                    if (discoveryClient == null)
+                    {
+                        Debug.LogError("********** DISCOVERY CLIENT IS NULL DURING LISTENING **********");
+                        await Task.Delay(1000, cancellationToken); // Wait a bit before trying again
+                        continue;
+                    }
+                
+                    // Every 5 seconds, log a heartbeat if no packets have been received
+                    TimeSpan timeSinceLastPacket = DateTime.Now - lastPacketTime;
+                    if (timeSinceLastPacket.TotalSeconds > 5)
+                    {
+                        Debug.Log($"********** BROADCAST LISTENER HEARTBEAT **********\n" +
+                                  $"Total packets received: {packetsReceived}\n" +
+                                  $"Time since last packet: {timeSinceLastPacket.TotalSeconds:F1} seconds\n" +
+                                  $"Is UDP client active: {discoveryClient != null}");
+                        lastPacketTime = DateTime.Now; // Reset timer
+                    }
+                    
                     // We'll handle cancellation manually here
                     var receiveTask = discoveryClient.ReceiveAsync();
                     
@@ -1024,6 +1235,19 @@ public class MatchmakingManager : MonoBehaviour
                         result = await receiveTask;
                     }
                 }
+                catch (ObjectDisposedException ex)
+                {
+                    Debug.LogWarning($"MatchmakingManager: UDP client was disposed during receive: {ex.Message}");
+                    // The UDP client was disposed - exit the loop
+                    break;
+                }
+                catch (NullReferenceException ex)
+                {
+                    Debug.LogError($"MatchmakingManager: Null reference during network receive: {ex.Message}");
+                    // Something is null, wait a bit and try again
+                    await Task.Delay(1000, cancellationToken);
+                    continue;
+                }
                 catch (OperationCanceledException)
                 {
                     // Cancellation was requested, exit the loop
@@ -1037,55 +1261,84 @@ public class MatchmakingManager : MonoBehaviour
                     continue;
                 }
                 
-                string message = Encoding.UTF8.GetString(result.Buffer);
-                
-                // Check if this is a discovery request (clients sending probe packets)
-                if (message == "DISCOVER_GAME_SERVER" && (IsServer || IsHost) && currentServerInfo != null)
+                // Null check the result buffer
+                if (result.Buffer == null)
                 {
-                    // This is a discovery request and we're a server, so respond directly to the requester
+                    Debug.LogWarning("MatchmakingManager: Received null buffer in broadcast");
+                    continue;
+                }
+                
+                try
+                {
+                    string message = Encoding.UTF8.GetString(result.Buffer);
+                    
+                    // Check if this is a discovery request (clients sending probe packets)
+                    if (message == "DISCOVER_GAME_SERVER" && (IsServer || IsHost) && currentServerInfo != null)
+                    {
+                        // This is a discovery request and we're a server, so respond directly to the requester
+                        try
+                        {
+                            // Create a temporary client to respond
+                            using (UdpClient responseClient = new UdpClient())
+                            {
+                                // Prepare server info to send back
+                                string jsonData = JsonUtility.ToJson(currentServerInfo);
+                                byte[] responseData = Encoding.UTF8.GetBytes(jsonData);
+                                
+                                // Send directly back to the requestor's endpoint
+                                responseClient.Send(responseData, responseData.Length, result.RemoteEndPoint);
+                                
+                                Debug.Log($"MatchmakingManager: Responded to discovery request from {result.RemoteEndPoint}");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.LogWarning($"MatchmakingManager: Error responding to discovery request: {ex.Message}");
+                        }
+                        
+                        continue; // Continue to next iteration
+                    }
+                    
+                    // Process received data 
+                    packetsReceived++;
+                    lastPacketTime = DateTime.Now;
+                    
+                    Debug.Log($"********** RECEIVED UDP PACKET #{packetsReceived} **********\n" +
+                              $"From: {result.RemoteEndPoint}\n" +
+                              $"Size: {result.Buffer.Length} bytes\n" +
+                              $"Message starts with: {message.Substring(0, Math.Min(20, message.Length))}...");
+                    
+                    // Process server info broadcast
                     try
                     {
-                        // Create a temporary client to respond
-                        using (UdpClient responseClient = new UdpClient())
+                        // Try to parse the message as server info
+                        ServerInfo serverInfo = JsonUtility.FromJson<ServerInfo>(message);
+                        if (serverInfo != null && !string.IsNullOrEmpty(serverInfo.serverName))
                         {
-                            // Prepare server info to send back
-                            string jsonData = JsonUtility.ToJson(currentServerInfo);
-                            byte[] responseData = Encoding.UTF8.GetBytes(jsonData);
+                            // Create a unique key for this server
+                            string serverKey = $"{serverInfo.ipAddress}:{serverInfo.port}";
                             
-                            // Send directly back to the requestor's endpoint
-                            responseClient.Send(responseData, responseData.Length, result.RemoteEndPoint);
+                            // Add or update in our discovered servers dictionary with timestamp
+                            lock (discoveredServers) // Use lock to prevent threading issues
+                            {
+                                discoveredServers[serverKey] = Time.time;
+                            }
                             
-                            Debug.Log($"MatchmakingManager: Responded to discovery request from {result.RemoteEndPoint}");
+                            Debug.Log($"MatchmakingManager: Discovered server: {serverInfo.serverName} at {serverInfo.ipAddress}:{serverInfo.port}");
                         }
                     }
                     catch (Exception ex)
                     {
-                        Debug.LogWarning($"MatchmakingManager: Error responding to discovery request: {ex.Message}");
-                    }
-                    
-                    continue; // Continue to next iteration
-                }
-                
-                // Process server info broadcast
-                try
-                {
-                    // Try to parse the message as server info
-                    ServerInfo serverInfo = JsonUtility.FromJson<ServerInfo>(message);
-                    if (serverInfo != null && !string.IsNullOrEmpty(serverInfo.serverName))
-                    {
-                        // Create a unique key for this server
-                        string serverKey = $"{serverInfo.ipAddress}:{serverInfo.port}";
-                        
-                        // Add or update in our discovered servers dictionary with timestamp
-                        discoveredServers[serverKey] = Time.time;
-                        
-                        Debug.Log($"MatchmakingManager: Discovered server: {serverInfo.serverName} at {serverInfo.ipAddress}:{serverInfo.port}");
+                        // Not a valid server info JSON, that's okay (might be other network traffic)
+                        // Log detailed info only in debug builds
+                        #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                        Debug.LogWarning($"MatchmakingManager: Error parsing server info: {ex.Message}");
+                        #endif
                     }
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
-                    // Not a valid server info JSON, that's okay (might be other network traffic)
-                    // Don't log this to avoid console spam
+                    Debug.LogError($"MatchmakingManager: Error processing received data: {ex.Message}");
                 }
             }
         }
@@ -1122,20 +1375,43 @@ public class MatchmakingManager : MonoBehaviour
     
     private void RefreshServerList()
     {
-        Debug.Log("MatchmakingManager: Refreshing server list");
+        Debug.Log("********** REFRESHING SERVER LIST **********");
         
         // Clear the current list
-        Debug.Log($"MatchmakingManager: Clearing server list (count before: {availableServers.Count})");
+        Debug.Log($"********** SERVER LIST BEFORE REFRESH: {availableServers.Count} SERVERS **********");
         availableServers.Clear();
         
         // Add any discovered servers from UDP broadcasts
         bool foundServers = AddDiscoveredUdpServers();
         
+        // If no servers found and in the Unity Editor, add a test server to verify UI is working
+        #if UNITY_EDITOR
+        if (availableServers.Count == 0)
+        {
+            Debug.Log("********** ADDING TEST SERVER IN EDITOR FOR DEBUGGING **********");
+            ServerInfo testServer = new ServerInfo(
+                "TEST SERVER (Editor Only)",
+                "127.0.0.1",
+                7777,
+                1,
+                maxPlayersPerServer,
+                false
+            );
+            availableServers.Add(testServer);
+            foundServers = true;
+            
+            Debug.Log($"********** ADDED TEST SERVER TO VERIFY UI **********\n" +
+                      $"Name: {testServer.serverName}\n" +
+                      $"IP: {testServer.ipAddress}\n" +
+                      $"Port: {testServer.port}");
+        }
+        #endif
+        
         // If network discovery hasn't found any servers, log a message
         if (!foundServers)
         {
             // This code can load saved servers from PlayerPrefs if implemented
-            Debug.Log("MatchmakingManager: No discovered servers found");
+            Debug.Log("********** NO DISCOVERED SERVERS FOUND **********");
         }
         
         // REMOVED: Do not add potential hosts automatically
@@ -1169,16 +1445,22 @@ public class MatchmakingManager : MonoBehaviour
         */
         
         // Log the results
-        Debug.Log($"MatchmakingManager: Server list updated with {availableServers.Count} servers");
+        Debug.Log($"********** SERVER LIST AFTER REFRESH: {availableServers.Count} SERVERS **********");
         if (availableServers.Count > 0)
         {
             foreach (var server in availableServers)
             {
-                Debug.Log($"MatchmakingManager: Available server: {server.serverName} at {server.ipAddress}:{server.port} ({server.currentPlayers}/{server.maxPlayers})");
+                Debug.Log($"********** SERVER AVAILABLE: {server.serverName} **********\n" +
+                          $"IP: {server.ipAddress}\n" +
+                          $"Port: {server.port}\n" +
+                          $"Players: {server.currentPlayers}/{server.maxPlayers}\n" +
+                          $"In Game: {server.inGame}");
             }
         }
         
         // Notify listeners about the updated server list
+        Debug.Log($"********** SENDING SERVER LIST UPDATE NOTIFICATION WITH {availableServers.Count} SERVERS **********");
+        Debug.Log($"********** HAS SUBSCRIBERS: {(OnServerListUpdated != null ? "YES" : "NO")} **********");
         OnServerListUpdated?.Invoke(availableServers);
     }
     
@@ -1191,7 +1473,8 @@ public class MatchmakingManager : MonoBehaviour
         float currentTime = Time.time;
         List<string> serversToRemove = new List<string>();
         
-        Debug.Log($"MatchmakingManager: Checking for discovered UDP servers. Count in dictionary: {discoveredServers.Count}");
+        Debug.Log($"********** CHECKING FOR DISCOVERED UDP SERVERS **********\n" +
+                  $"Server keys in dictionary: {discoveredServers.Count}");
         
         // Add all discovered servers that have been seen recently
         foreach (var kvp in discoveredServers)
@@ -1227,7 +1510,10 @@ public class MatchmakingManager : MonoBehaviour
                     availableServers.Add(serverInfo);
                     foundServers = true;
                     
-                    Debug.Log($"MatchmakingManager: Added discovered server at {ipAddress}:{port}");
+                    Debug.Log($"********** ADDING DISCOVERED SERVER **********\n" +
+                              $"IP: {ipAddress}\n" +
+                              $"Port: {port}\n" +
+                              $"Current servers count: {availableServers.Count}");
                 }
             }
         }
@@ -1263,6 +1549,20 @@ public class MatchmakingManager : MonoBehaviour
     public void JoinServer(ServerInfo serverInfo)
     {
         Debug.Log($"MatchmakingManager: Attempting to join server: {serverInfo.serverName} at {serverInfo.ipAddress}:{serverInfo.port}");
+        
+        // Check if we're already hosting a server and shut it down before joining
+        if (NetworkManager.Singleton != null && (NetworkManager.Singleton.IsHost || NetworkManager.Singleton.IsServer))
+        {
+            Debug.Log("MatchmakingManager: Already hosting a server. Shutting down before joining another server.");
+            NetworkManager.Singleton.Shutdown();
+            
+            // Allow a short delay for proper cleanup
+            if (gameObject.activeInHierarchy)
+            {
+                SafeStartCoroutine(JoinServerAfterShutdown(serverInfo), "JoinServerAfterShutdown");
+                return;
+            }
+        }
         
         // Create a NetworkManager if it doesn't exist
         if (NetworkManager.Singleton == null)
@@ -1353,218 +1653,80 @@ public class MatchmakingManager : MonoBehaviour
         }
     }
     
+    // Add this new method to handle joining after shutdown
+    private IEnumerator JoinServerAfterShutdown(ServerInfo serverInfo)
+    {
+        // Wait for the previous instance to fully shut down
+        yield return new WaitForSeconds(1.0f);
+        JoinServer(serverInfo);
+    }
+    
     #endregion
     
     #region NetworkManager Callbacks
     
     private void OnClientConnected(ulong clientId)
     {
-        Debug.Log($"MatchmakingManager: Client connected with ID: {clientId}, Local client ID: {NetworkManager.Singleton.LocalClientId}");
+        Debug.Log($"********** CLIENT CONNECTED TO SERVER **********\n" +
+                  $"Client ID: {clientId}\n" +
+                  $"Current server: {(currentServerInfo != null ? currentServerInfo.serverName : "None")}\n" +
+                  $"Is Host: {IsHost}, Is Server: {IsServer}");
         
-        if (clientId == NetworkManager.Singleton.LocalClientId)
+        if (currentServerInfo != null)
         {
-            Debug.Log("MatchmakingManager: This is our local client that connected!");
-            // Debug.Log("Connected as " + (NetworkManager.Singleton.IsHost ? "Host" : "Client"));
+            // Update player counts
+            currentServerInfo.currentPlayers++;
             
-            // If we're the host/server, load the lobby scene
-            if (NetworkManager.Singleton.IsHost || NetworkManager.Singleton.IsServer)
-            {
-                Debug.Log($"MatchmakingManager: Loading lobby scene: {lobbySceneName}");
-                
-                try
-                {
-                    // Check if SceneManager exists
-                    if (NetworkManager.Singleton.SceneManager != null)
-                    {
-                        // Register scene loaded event handler
-                        NetworkManager.Singleton.SceneManager.OnLoadComplete += OnSceneLoadComplete;
-                        
-                        // Check if scene exists without using SceneUtility
-                        bool sceneExists = false;
-                        for (int i = 0; i < SceneManager.sceneCountInBuildSettings; i++)
-                        {
-                            string scenePath = SceneUtility.GetScenePathByBuildIndex(i);
-                            string sceneName = System.IO.Path.GetFileNameWithoutExtension(scenePath);
-                            if (sceneName == lobbySceneName)
-                            {
-                                sceneExists = true;
-                                break;
-                            }
-                        }
-                        
-                        if (sceneExists)
-                        {
-                            Debug.Log($"MatchmakingManager: Found {lobbySceneName} in build settings, loading via NetworkManager.SceneManager");
-                            try
-                            {
-                                NetworkManager.Singleton.SceneManager.LoadScene(lobbySceneName, LoadSceneMode.Single);
-                            }
-                            catch (Exception ex)
-                            {
-                                Debug.LogError($"MatchmakingManager: Error loading scene through NetworkManager: {ex.Message}");
-                                // Fall back to manual scene loading
-                                SceneManager.LoadScene(lobbySceneName);
-                            }
-                        }
-                        else
-                        {
-                            Debug.LogError($"MatchmakingManager: Lobby scene '{lobbySceneName}' does not exist in the build settings!");
-                            // Fall back to manual scene loading
-                            Debug.Log($"MatchmakingManager: Trying to load scene manually: {lobbySceneName}");
-                            SceneManager.LoadScene(lobbySceneName);
-                        }
-                    }
-                    else
-                    {
-                        Debug.LogError("MatchmakingManager: NetworkManager.SceneManager is null! Cannot load lobby scene through network. Trying manual load.");
-                        // Try manual scene loading
-                        SceneManager.LoadScene(lobbySceneName);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Debug.LogError($"MatchmakingManager: Error loading lobby scene: {ex.Message}\n{ex.StackTrace}");
-                    // Last resort - try direct scene loading
-                    try
-                    {
-                        SceneManager.LoadScene(lobbySceneName);
-                    }
-                    catch (Exception innerEx)
-                    {
-                        Debug.LogError($"MatchmakingManager: Critical error! Could not load lobby scene: {innerEx.Message}");
-                    }
-                }
-            }
+            // Update UI if needed
+            Debug.Log($"********** SERVER NOW HAS {currentServerInfo.currentPlayers} PLAYERS **********");
             
-            // Local client connected successfully
-            OnJoinServerSuccess?.Invoke();
-        }
-        else if (NetworkManager.Singleton.IsServer || NetworkManager.Singleton.IsHost)
-        {
-            Debug.Log($"MatchmakingManager: Remote client {clientId} connected to the server");
-        }
-        
-        if (NetworkManager.Singleton.IsServer)
-        {
-            // Update player count
-            UpdateServerPlayerCount(NetworkManager.Singleton.ConnectedClientsIds.Count);
-        }
-    }
-    
-    // Handler for scene load completion
-    private void OnSceneLoadComplete(ulong clientId, string sceneName, LoadSceneMode loadSceneMode)
-    {
-        Debug.Log($"MatchmakingManager: Scene '{sceneName}' loaded for client {clientId}");
-        
-        // If this is the lobby scene
-        if (sceneName == lobbySceneName)
-        {
-            // Find and initialize the LobbyManager
-            StartCoroutine(InitializeLobbyManagerAfterDelay());
-        }
-    }
-    
-    // Wait a brief moment for all scene objects to initialize before accessing LobbyManager
-    private IEnumerator InitializeLobbyManagerAfterDelay()
-    {
-        // Small delay to ensure scene is fully initialized
-        yield return new WaitForSeconds(0.2f);
-        
-        LobbyManager lobbyManager = FindObjectOfType<LobbyManager>();
-        if (lobbyManager != null)
-        {
-            Debug.Log("MatchmakingManager: Found LobbyManager, initializing");
-            
-            // Check if it has a NetworkObject component
-            NetworkObject networkObject = lobbyManager.GetComponent<NetworkObject>();
-            if (networkObject != null)
-            {
-                // If not spawned, spawn it
-                if (!networkObject.IsSpawned)
-                {
-                    Debug.Log("MatchmakingManager: Spawning LobbyManager's NetworkObject");
-                    try
-                    {
-                        networkObject.Spawn();
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.LogError($"MatchmakingManager: Error spawning LobbyManager: {ex.Message}");
-                    }
-                }
-                else
-                {
-                    Debug.Log("MatchmakingManager: LobbyManager's NetworkObject already spawned");
-                }
-            }
-            else
-            {
-                Debug.LogError("MatchmakingManager: LobbyManager does not have a NetworkObject component!");
-            }
-        }
-        else
-        {
-            Debug.LogError("MatchmakingManager: LobbyManager not found in the scene!");
+            // Save updated info
+            RegisterServer();
         }
     }
     
     private void OnClientDisconnected(ulong clientId)
     {
-        Debug.Log($"Client disconnected: {clientId}");
+        Debug.Log($"********** CLIENT DISCONNECTED FROM SERVER **********\n" +
+                  $"Client ID: {clientId}");
         
-        if (NetworkManager.Singleton.IsServer)
+        if (currentServerInfo != null && currentServerInfo.currentPlayers > 0)
         {
-            // Update player count
-            UpdateServerPlayerCount(NetworkManager.Singleton.ConnectedClientsIds.Count);
+            // Update player counts
+            currentServerInfo.currentPlayers--;
+            
+            // Update UI if needed
+            Debug.Log($"********** SERVER NOW HAS {currentServerInfo.currentPlayers} PLAYERS **********");
+            
+            // Save updated info
+            RegisterServer();
         }
     }
     
     private void OnServerStarted()
     {
-        Debug.Log("MatchmakingManager: Server started successfully");
+        Debug.Log($"********** SERVER STARTED SUCCESSFULLY **********\n" +
+                  $"Server Name: {(currentServerInfo != null ? currentServerInfo.serverName : "Unknown")}\n" +
+                  $"Is Host: {IsHost}, Is Server: {IsServer}");
         
-        // Load the lobby scene now that the server has started
-        Debug.Log("MatchmakingManager: Loading lobby scene through NetworkManager");
-        
-        try
+        // Load initial scene if configured
+        if (!string.IsNullOrEmpty(lobbySceneName))
         {
-            // Make sure we have a lobby scene name defined
-            string lobbySceneName = "Lobby";
-            
-            if (NetworkManager.Singleton != null && NetworkManager.Singleton.SceneManager != null)
+            try
             {
-                // Check if the scene exists in the build settings
-                bool sceneExists = false;
-                for (int i = 0; i < SceneManager.sceneCountInBuildSettings; i++)
-                {
-                    string scenePath = SceneUtility.GetScenePathByBuildIndex(i);
-                    string sceneName = System.IO.Path.GetFileNameWithoutExtension(scenePath);
-                    if (sceneName == lobbySceneName)
-                    {
-                        sceneExists = true;
-                        break;
-                    }
-                }
+                Debug.Log($"********** LOADING LOBBY SCENE: {lobbySceneName} **********");
                 
-                if (sceneExists)
-                {
-                    Debug.Log($"MatchmakingManager: Found {lobbySceneName} in build settings, loading via NetworkManager");
-                    NetworkManager.Singleton.SceneManager.LoadScene(lobbySceneName, LoadSceneMode.Single);
-                }
-                else
-                {
-                    Debug.LogError($"MatchmakingManager: Lobby scene '{lobbySceneName}' not found in build settings");
-                }
+                // Use the Netcode SceneManager to ensure all clients load the scene
+                NetworkManager.Singleton.SceneManager.LoadScene(lobbySceneName, LoadSceneMode.Single);
             }
-            else
+            catch (Exception ex)
             {
-                Debug.LogError("MatchmakingManager: NetworkManager or SceneManager is null");
+                Debug.LogError($"********** ERROR LOADING LOBBY SCENE: {ex.Message} **********\n{ex.StackTrace}");
             }
         }
-        catch (Exception ex)
-        {
-            Debug.LogError($"MatchmakingManager: Error loading lobby scene: {ex.Message}\n{ex.StackTrace}");
-        }
+        
+        // Register the server after starting
+        RegisterServer();
     }
     
     /// <summary>
@@ -1585,8 +1747,8 @@ public class MatchmakingManager : MonoBehaviour
                 // If this is the Lobby scene, initialize the LobbyManager
                 if (sceneEvent.SceneName.Contains("Lobby"))
                 {
-                    Debug.Log("MatchmakingManager: Lobby scene loaded, initializing LobbyManager");
-                    StartCoroutine(InitializeLobbyManagerAfterDelay());
+                    Debug.Log("MatchmakingManager: Lobby scene loaded, initializing lobby components");
+                    SafeStartCoroutine(InitializeLobbyManagerAfterDelay(), "InitializeLobbyManagerAfterDelay");
                 }
                 break;
                 
@@ -1742,28 +1904,110 @@ public class MatchmakingManager : MonoBehaviour
     }
     
     /// <summary>
+    /// Safely starts a coroutine only if the GameObject is active
+    /// </summary>
+    private Coroutine SafeStartCoroutine(IEnumerator routine, string routineName = "")
+    {
+        if (gameObject == null || !gameObject.activeInHierarchy)
+        {
+            Debug.LogWarning($"MatchmakingManager: Cannot start coroutine '{routineName}' - GameObject is inactive or null");
+            return null;
+        }
+        
+        try
+        {
+            return StartCoroutine(routine);
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError($"MatchmakingManager: Error starting coroutine '{routineName}': {ex.Message}");
+            return null;
+        }
+    }
+    
+    /// <summary>
     /// Stop listening for UDP broadcast messages
     /// </summary>
     private void StopUdpDiscovery()
     {
-        if (isDiscoveryRunning)
+        if (isRefreshingServers)
         {
             // Cancel any async operations
             if (cancellationTokenSource != null)
             {
-                cancellationTokenSource.Cancel();
-                cancellationTokenSource = null;
+                try
+                {
+                    // Cancel the token but wait a small amount of time for tasks to complete
+                    // This helps prevent the "Thread may have been prematurely finalized" warning
+                    cancellationTokenSource.Cancel();
+                    
+                    // Check if we can use a coroutine (only if the GameObject is active)
+                    if (gameObject.activeInHierarchy)
+                    {
+                        // Start a coroutine to wait before closing resources
+                        SafeStartCoroutine(CloseDiscoveryResourcesAfterDelay(), "CloseDiscoveryResourcesAfterDelay");
+                    }
+                    else
+                    {
+                        // GameObject is inactive, we can't use a coroutine, so clean up immediately
+                        Debug.Log("MatchmakingManager: GameObject inactive, performing immediate cleanup");
+                        CleanupDiscoveryResources();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError($"Error stopping UDP discovery: {ex.Message}");
+                    
+                    // Fall back to immediate cleanup if coroutine fails
+                    CleanupDiscoveryResources();
+                }
+            }
+            else
+            {
+                // If no cancellation token, just cleanup directly
+                CleanupDiscoveryResources();
             }
             
-            // Close the UDP client
-            if (discoveryClient != null)
+            isRefreshingServers = false;
+            Debug.Log("MatchmakingManager: Stopped UDP discovery");
+        }
+    }
+    
+    // Helper method to delay resource cleanup to give threads time to exit gracefully
+    private IEnumerator CloseDiscoveryResourcesAfterDelay()
+    {
+        // Wait a short time for async operations to notice the cancellation
+        yield return new WaitForSeconds(0.1f);
+        
+        // Clean up resources
+        CleanupDiscoveryResources();
+    }
+    
+    // Helper method to clean up discovery resources
+    private void CleanupDiscoveryResources()
+    {
+        // Dispose the cancellation token source
+        if (cancellationTokenSource != null)
+        {
+            cancellationTokenSource.Dispose();
+            cancellationTokenSource = null;
+        }
+        
+        // Close the UDP client
+        if (discoveryClient != null)
+        {
+            try 
             {
                 discoveryClient.Close();
+            }
+            catch (Exception ex) 
+            {
+                Debug.LogWarning($"Error closing discovery client: {ex.Message}");
+            }
+            finally 
+            {
                 discoveryClient = null;
             }
-            
-            isDiscoveryRunning = false;
-            Debug.Log("MatchmakingManager: Stopped UDP discovery");
         }
     }
     
@@ -1784,33 +2028,69 @@ public class MatchmakingManager : MonoBehaviour
             Debug.LogError($"MatchmakingManager: Error in listener task: {ex.Message}");
         }
     }
+
+    // Add this method to properly initialize the lobby after scene loading
+    private IEnumerator InitializeLobbyManagerAfterDelay()
+    {
+        // Wait a moment for the scene to fully load
+        yield return new WaitForSeconds(0.5f);
+        
+        Debug.Log("MatchmakingManager: Initializing lobby components after delay");
+        
+        // Look for any lobby-related components that need initialization
+        var networkObjects = FindObjectsOfType<NetworkObject>();
+        foreach (var netObj in networkObjects)
+        {
+            // Ensure network objects are properly set up
+            if (IsServer && !netObj.IsSpawned && netObj.gameObject.activeInHierarchy)
+            {
+                try
+                {
+                    Debug.Log($"MatchmakingManager: Auto-spawning network object: {netObj.name}");
+                    netObj.Spawn();
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError($"MatchmakingManager: Error spawning network object {netObj.name}: {ex.Message}");
+                }
+            }
+        }
+        
+        // Find any game-specific managers that might need initialization
+        // This is a generic implementation - customize as needed for your game
+        Debug.Log("MatchmakingManager: Lobby initialization completed");
+    }
 }
 
 // Helper extension methods for task cancellation
 public static class TaskExtensions
 {
-    // For Task<T> (with return value)
+    /// <summary>
+    /// Extension method to add cancellation support to an existing Task<T>
+    /// </summary>
     public static async Task<T> WithCancellation<T>(this Task<T> task, CancellationToken cancellationToken)
     {
         var tcs = new TaskCompletionSource<bool>();
-        using (cancellationToken.Register(s => ((TaskCompletionSource<bool>)s).TrySetResult(true), tcs))
+        using (cancellationToken.Register(() => tcs.TrySetResult(true)))
         {
             if (task != await Task.WhenAny(task, tcs.Task))
                 throw new OperationCanceledException(cancellationToken);
         }
-        return await task;
+        return await task; // The task has already completed successfully here
     }
     
-    // For Task (without return value)
+    /// <summary>
+    /// Extension method to add cancellation support to an existing Task
+    /// </summary>
     public static async Task WithCancellation(this Task task, CancellationToken cancellationToken)
     {
         var tcs = new TaskCompletionSource<bool>();
-        using (cancellationToken.Register(s => ((TaskCompletionSource<bool>)s).TrySetResult(true), tcs))
+        using (cancellationToken.Register(() => tcs.TrySetResult(true)))
         {
             if (task != await Task.WhenAny(task, tcs.Task))
                 throw new OperationCanceledException(cancellationToken);
         }
-        await task;
+        await task; // The task has already completed successfully here
     }
 }
 
