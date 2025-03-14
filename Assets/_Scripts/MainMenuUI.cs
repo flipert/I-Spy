@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using Unity.Services.Core;
 
 /// <summary>
 /// UI controller for the main menu with Create and Join match options
@@ -25,6 +26,12 @@ public class MainMenuUI : MonoBehaviour
     [SerializeField] private TMP_InputField serverNameInput;
     [SerializeField] private Button createServerButton;
     [SerializeField] private Button cancelCreateButton;
+    
+    [Header("Unity Gaming Services")]
+    [SerializeField] private TextMeshProUGUI ugsStatusText;
+    [SerializeField] private Image ugsStatusIcon;
+    [SerializeField] private Color connectedColor = new Color(0.2f, 0.8f, 0.2f);
+    [SerializeField] private Color disconnectedColor = new Color(0.8f, 0.2f, 0.2f);
     
     // Reference to the server browser
     private ServerBrowser serverBrowser;
@@ -62,6 +69,41 @@ public class MainMenuUI : MonoBehaviour
             
         // Set initial UI state
         ShowMainMenuPanel();
+        
+        // Check Unity Gaming Services status
+        CheckUgsStatus();
+    }
+    
+    private void Start()
+    {
+        // Re-check UGS status after a delay to allow initialization
+        StartCoroutine(CheckUgsStatusDelayed());
+    }
+    
+    private IEnumerator CheckUgsStatusDelayed()
+    {
+        // Wait for possible UGS initialization
+        yield return new WaitForSeconds(2f);
+        CheckUgsStatus();
+    }
+    
+    private void CheckUgsStatus()
+    {
+        if (ugsStatusText == null || ugsStatusIcon == null)
+            return;
+            
+        bool isInitialized = UnityServices.State == ServicesInitializationState.Initialized;
+            
+        if (isInitialized)
+        {
+            ugsStatusText.text = "Online Matchmaking: Connected";
+            ugsStatusIcon.color = connectedColor;
+        }
+        else
+        {
+            ugsStatusText.text = "Online Matchmaking: Disconnected";
+            ugsStatusIcon.color = disconnectedColor;
+        }
     }
     
     #region Button Event Handlers

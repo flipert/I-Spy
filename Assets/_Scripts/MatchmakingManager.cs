@@ -16,6 +16,13 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Net.Http;
+using Unity.Networking.Transport.Relay;
+using Unity.Services.Authentication;
+using Unity.Services.Core;
+using Unity.Services.Lobbies;
+using Unity.Services.Lobbies.Models;
+using Unity.Services.Relay;
+using Unity.Services.Relay.Models;
 
 /// <summary>
 /// Manages matchmaking, server discovery and connection for dedicated servers
@@ -34,11 +41,19 @@ public class MatchmakingManager : MonoBehaviour
     
     [Header("Debug Settings")]
     [SerializeField] private bool showTestServersInEditor = false;
+    [SerializeField] private bool debugMode = false;
     
     [Header("Character Selection")]
     [SerializeField] private GameObject[] characterPrefabs;
     [SerializeField] private int defaultCharacterIndex = 0;
     
+    [Header("Unity Gaming Services")]
+    [SerializeField] private bool useUnityServices = true;
+    [SerializeField] private string lobbyName = "My Game Lobby";
+    [SerializeField] private int relayRegionIndex = 0; // 0 = automatically select best region
+
+    private string[] availableRegions = new string[] { "auto", "us-east", "us-west", "eu-west", "ap-south" };
+
     // Singleton instance
     public static MatchmakingManager Instance { get; private set; }
     
@@ -52,6 +67,9 @@ public class MatchmakingManager : MonoBehaviour
         public int currentPlayers;
         public int maxPlayers;
         public bool inGame; // If true, the match has already started
+        
+        // New property for lobby ID
+        public string lobbyId;
         
         // Default constructor needed for deserialization
         public ServerInfo() { }
@@ -114,7 +132,16 @@ public class MatchmakingManager : MonoBehaviour
     // Static property to replace NetworkManagerUI.SelectedCharacterPrefab
     public static GameObject SelectedCharacterPrefab { get; private set; }
     
-    private void Awake()
+    // Cloud matchmaking properties
+    private Lobby currentLobby;
+    private string relayJoinCode;
+    private string playerId;
+    private bool isServicesInitialized = false;
+    private Dictionary<string, Lobby> availableLobbies = new Dictionary<string, Lobby>();
+    private Coroutine lobbyHeartbeatCoroutine;
+    private Coroutine lobbyUpdateCoroutine;
+    
+    private async void Awake()
     {
         // Singleton setup with better logging
         if (Instance != null && Instance != this)
@@ -180,6 +207,48 @@ public class MatchmakingManager : MonoBehaviour
         
         // Initialize default character in Awake
         SetDefaultCharacter();
+        
+        // Initialize Unity Gaming Services if enabled
+        if (useUnityServices)
+        {
+            Debug.Log("MatchmakingManager: Initializing Unity Gaming Services");
+            try
+            {
+                await InitializeUnityServicesAsync();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Error initializing Unity Services: {ex.Message}");
+                useUnityServices = false; // Fall back to local discovery
+            }
+        }
+    }
+    
+    // Unity Gaming Services Initialization
+    private async Task InitializeUnityServicesAsync()
+    {
+        try
+        {
+            // Initialize Unity Services
+            await UnityServices.InitializeAsync();
+            
+            // Sign in anonymously
+            if (!AuthenticationService.Instance.IsSignedIn)
+            {
+                await AuthenticationService.Instance.SignInAnonymouslyAsync();
+            }
+            
+            // Get player ID
+            playerId = AuthenticationService.Instance.PlayerId;
+            
+            Debug.Log($"Player signed in with ID: {playerId}");
+            isServicesInitialized = true;
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError($"Failed to initialize Unity Services: {ex.Message}");
+            throw;
+        }
     }
     
     private void Start()
@@ -307,6 +376,9 @@ public class MatchmakingManager : MonoBehaviour
             Debug.LogWarning($"MatchmakingManager: Non-critical error during final cleanup: {ex.Message}");
         }
         
+        // Clean up Unity Gaming Services resources
+        LeaveServer();
+        
         Debug.Log("MatchmakingManager: OnDestroy completed successfully");
     }
     
@@ -315,36 +387,106 @@ public class MatchmakingManager : MonoBehaviour
     /// <summary>
     /// Create a new dedicated server with the given name
     /// </summary>
-    public void CreateServer(string serverName)
+    public async void CreateServer(string serverName)
     {
-        Debug.Log($"MatchmakingManager: Creating server: {serverName}");
+        Debug.Log($"Creating server: {serverName}");
         
-        // Check if we're already hosting
-        if (NetworkManager.Singleton != null && (NetworkManager.Singleton.IsHost || NetworkManager.Singleton.IsServer))
+        // Clean up any existing server first
+        if (NetworkManager.Singleton != null && NetworkManager.Singleton.IsListening)
         {
-            Debug.LogWarning("MatchmakingManager: Already hosting a server. Shutting down before creating new one.");
+            Debug.Log("Shutting down existing network session first");
             NetworkManager.Singleton.Shutdown();
-            // Allow a short delay for proper cleanup
-            if (gameObject.activeInHierarchy)
-            {
-                SafeStartCoroutine(CreateServerAfterShutdown(serverName), "CreateServerAfterShutdown");
-            }
-            else
-            {
-                Debug.LogWarning("MatchmakingManager: GameObject inactive, can't use coroutine. Creating server immediately.");
-                CreateServerInternal(serverName);
-            }
+            StartCoroutine(CreateServerAfterShutdown(serverName, useUnityServices && isServicesInitialized));
             return;
         }
         
-        CreateServerInternal(serverName);
+        if (useUnityServices && isServicesInitialized)
+        {
+            await CreateServerWithUnityServices(serverName);
+        }
+        else
+        {
+            // Fallback to original implementation for local networks
+            CreateServerInternal(serverName);
+        }
     }
     
-    private IEnumerator CreateServerAfterShutdown(string serverName)
+    private IEnumerator CreateServerAfterShutdown(string serverName, bool useUnityServicesForThis)
     {
         // Wait for the previous instance to fully shut down
         yield return new WaitForSeconds(1.0f);
-        CreateServerInternal(serverName);
+        
+        if (useUnityServicesForThis)
+        {
+            // Start the async method but don't await it in the coroutine
+            var _ = CreateServerWithUnityServices(serverName);
+        }
+        else
+        {
+            CreateServerInternal(serverName);
+        }
+    }
+    
+    private async Task CreateServerWithUnityServices(string serverName)
+    {
+        Debug.Log("Creating server using Unity Gaming Services");
+        
+        // Verify that NetworkManager exists and isn't already running
+        if (NetworkManager.Singleton == null)
+        {
+            Debug.LogError("NetworkManager.Singleton is null! Cannot create server.");
+            OnCreateServerFailed?.Invoke("NetworkManager not found");
+            return;
+        }
+        
+        if (NetworkManager.Singleton.IsListening)
+        {
+            Debug.LogError("NetworkManager is still listening! Shutting down first.");
+            NetworkManager.Singleton.Shutdown();
+            // Wait a moment for shutdown to complete
+            await Task.Delay(1000);
+        }
+        
+        bool success = await CreateRelayServerAsync(serverName);
+        
+        if (success)
+        {
+            // Verify again that NetworkManager isn't running before starting host
+            if (NetworkManager.Singleton.IsListening)
+            {
+                Debug.LogError("NetworkManager is still listening even after shutdown! Cannot start host.");
+                OnCreateServerFailed?.Invoke("NetworkManager shutdown failed");
+                return;
+            }
+            
+            // Start the server with Relay
+            bool serverStarted = NetworkManager.Singleton.StartHost();
+            
+            if (serverStarted)
+            {
+                Debug.Log("Relay host started successfully");
+                currentServerInfo = new ServerInfo(
+                    serverName, 
+                    "UGS Relay", 
+                    7777, 
+                    1, 
+                    maxPlayersPerServer, 
+                    false
+                );
+                
+                OnCreateServerSuccess?.Invoke();
+            }
+            else
+            {
+                Debug.LogError("Failed to start host");
+                OnCreateServerFailed?.Invoke("Failed to start host");
+            }
+        }
+        else
+        {
+            Debug.LogError("Failed to create relay server");
+            OnCreateServerFailed?.Invoke("Failed to create relay server");
+        }
     }
     
     private void CreateServerInternal(string serverName)
@@ -1365,15 +1507,15 @@ public class MatchmakingManager : MonoBehaviour
         
         while (true)
         {
-            // Refresh the server list
-            RefreshServerList();
+            // Refresh the server list - use fire and forget pattern
+            var _ = RefreshServerList();
             
             // Wait before the next refresh
             yield return new WaitForSeconds(serverRefreshRate);
         }
     }
     
-    private void RefreshServerList()
+    private async Task RefreshServerList()
     {
         Debug.Log("********** REFRESHING SERVER LIST **********");
         
@@ -1381,12 +1523,32 @@ public class MatchmakingManager : MonoBehaviour
         Debug.Log($"********** SERVER LIST BEFORE REFRESH: {availableServers.Count} SERVERS **********");
         availableServers.Clear();
         
-        // Add any discovered servers from UDP broadcasts
-        bool foundServers = AddDiscoveredUdpServers();
+        // Use Unity Gaming Services if enabled
+        if (useUnityServices && isServicesInitialized)
+        {
+            try
+            {
+                Debug.Log("********** QUERYING UNITY GAMING SERVICES LOBBIES **********");
+                List<ServerInfo> ugsServers = await QueryLobbiesAsync();
+                availableServers.AddRange(ugsServers);
+                Debug.Log($"********** FOUND {ugsServers.Count} LOBBIES VIA UNITY GAMING SERVICES **********");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Error querying UGS lobbies: {ex.Message}");
+            }
+        }
+        
+        // Add any discovered servers from UDP broadcasts (if UGS is disabled or in debug mode)
+        if (!useUnityServices || debugMode)
+        {
+            bool foundLocalServers = AddDiscoveredUdpServers();
+            Debug.Log($"********** LOCAL UDP DISCOVERY: {(foundLocalServers ? "FOUND SERVERS" : "NO SERVERS FOUND")} **********");
+        }
         
         // If no servers found and in the Unity Editor, add a test server to verify UI is working
         #if UNITY_EDITOR
-        if (availableServers.Count == 0)
+        if (availableServers.Count == 0 && showTestServersInEditor)
         {
             Debug.Log("********** ADDING TEST SERVER IN EDITOR FOR DEBUGGING **********");
             ServerInfo testServer = new ServerInfo(
@@ -1398,7 +1560,6 @@ public class MatchmakingManager : MonoBehaviour
                 false
             );
             availableServers.Add(testServer);
-            foundServers = true;
             
             Debug.Log($"********** ADDED TEST SERVER TO VERIFY UI **********\n" +
                       $"Name: {testServer.serverName}\n" +
@@ -1406,43 +1567,6 @@ public class MatchmakingManager : MonoBehaviour
                       $"Port: {testServer.port}");
         }
         #endif
-        
-        // If network discovery hasn't found any servers, log a message
-        if (!foundServers)
-        {
-            // This code can load saved servers from PlayerPrefs if implemented
-            Debug.Log("********** NO DISCOVERED SERVERS FOUND **********");
-        }
-        
-        // REMOVED: Do not add potential hosts automatically
-        // This code was causing "phantom" server entries to appear
-        /*
-        // If we still don't have any servers, add potential hosts in the subnet as a fallback
-        if (availableServers.Count == 0 && addPotentialHostsWhenEmpty)
-        {
-            // This is just for user experience - showing potential hosts the user might try to connect to
-            string localIP = GetLocalIPv4();
-            if (!string.IsNullOrEmpty(localIP))
-            {
-                string[] ipParts = localIP.Split('.');
-                if (ipParts.Length == 4)
-                {
-                    string subnet = $"{ipParts[0]}.{ipParts[1]}.{ipParts[2]}";
-                    
-                    // Add a few potential servers in the local subnet
-                    Debug.Log($"MatchmakingManager: Adding potential hosts in subnet {subnet}.x");
-                    availableServers.Add(new ServerInfo("Potential Host", $"{subnet}.1", 7777, 0, maxPlayersPerServer, false));
-                    
-                    // Don't add too many potential hosts to avoid cluttering the UI
-                    if (debugShowExtraHosts)
-                    {
-                        availableServers.Add(new ServerInfo("Potential Host", $"{subnet}.100", 7777, 0, maxPlayersPerServer, false));
-                        availableServers.Add(new ServerInfo("Potential Host", $"{subnet}.254", 7777, 0, maxPlayersPerServer, false));
-                    }
-                }
-            }
-        }
-        */
         
         // Log the results
         Debug.Log($"********** SERVER LIST AFTER REFRESH: {availableServers.Count} SERVERS **********");
@@ -1454,7 +1578,8 @@ public class MatchmakingManager : MonoBehaviour
                           $"IP: {server.ipAddress}\n" +
                           $"Port: {server.port}\n" +
                           $"Players: {server.currentPlayers}/{server.maxPlayers}\n" +
-                          $"In Game: {server.inGame}");
+                          $"In Game: {server.inGame}\n" +
+                          $"Is UGS: {(!string.IsNullOrEmpty(server.lobbyId) ? "YES" : "NO")}");
             }
         }
         
@@ -1533,14 +1658,16 @@ public class MatchmakingManager : MonoBehaviour
     /// </summary>
     public void JoinServer(int serverIndex)
     {
+        Debug.Log($"Joining server at index {serverIndex}");
+        
         if (serverIndex < 0 || serverIndex >= availableServers.Count)
         {
+            Debug.LogError($"Invalid server index: {serverIndex}");
             OnJoinServerFailed?.Invoke("Invalid server index");
             return;
         }
         
-        ServerInfo serverToJoin = availableServers[serverIndex];
-        JoinServer(serverToJoin);
+        JoinServer(availableServers[serverIndex]);
     }
     
     /// <summary>
@@ -1548,108 +1675,74 @@ public class MatchmakingManager : MonoBehaviour
     /// </summary>
     public void JoinServer(ServerInfo serverInfo)
     {
-        Debug.Log($"MatchmakingManager: Attempting to join server: {serverInfo.serverName} at {serverInfo.ipAddress}:{serverInfo.port}");
+        Debug.Log($"Joining server: {serverInfo.serverName}");
         
-        // Check if we're already hosting a server and shut it down before joining
-        if (NetworkManager.Singleton != null && (NetworkManager.Singleton.IsHost || NetworkManager.Singleton.IsServer))
+        // Clean up existing connection first
+        if (NetworkManager.Singleton != null && NetworkManager.Singleton.IsListening)
         {
-            Debug.Log("MatchmakingManager: Already hosting a server. Shutting down before joining another server.");
+            Debug.Log("Shutting down existing network session first");
             NetworkManager.Singleton.Shutdown();
-            
-            // Allow a short delay for proper cleanup
-            if (gameObject.activeInHierarchy)
-            {
-                SafeStartCoroutine(JoinServerAfterShutdown(serverInfo), "JoinServerAfterShutdown");
-                return;
-            }
+            StartCoroutine(JoinServerAfterShutdown(serverInfo));
+            return;
         }
         
-        // Create a NetworkManager if it doesn't exist
+        // Check if this is a Unity Gaming Services lobby
+        if (useUnityServices && !string.IsNullOrEmpty(serverInfo.lobbyId))
+        {
+            Debug.Log($"Joining Unity Gaming Services lobby: {serverInfo.lobbyId}");
+            JoinLobby(serverInfo.lobbyId);
+            return;
+        }
+        
+        // Otherwise use direct connection
+        JoinServerDirect(serverInfo);
+    }
+    
+    // Add this new method to handle direct connections
+    private void JoinServerDirect(ServerInfo serverInfo)
+    {
+        Debug.Log($"Joining server via direct connection: {serverInfo.ipAddress}:{serverInfo.port}");
+        
+        // Verify that NetworkManager exists
         if (NetworkManager.Singleton == null)
         {
-            Debug.Log("MatchmakingManager: Creating NetworkManager for client connection");
-            GameObject networkManagerObject = new GameObject("NetworkManager");
-            NetworkManager networkManager = networkManagerObject.AddComponent<NetworkManager>();
-            UnityTransport transport = networkManagerObject.AddComponent<UnityTransport>();
-            DontDestroyOnLoad(networkManagerObject);
-            
-            // Configure NetworkManager
-            if (networkManager.NetworkConfig == null)
-            {
-                networkManager.NetworkConfig = new NetworkConfig();
-            }
-            
-            // Set the transport in the NetworkConfig
-            networkManager.NetworkConfig.NetworkTransport = transport;
-            
-            networkManager.NetworkConfig.PlayerPrefab = null;
-            networkManager.NetworkConfig.ConnectionApproval = true;
-        }
-        
-        if (NetworkManager.Singleton == null)
-        {
-            string error = "Failed to create NetworkManager";
-            Debug.LogError("MatchmakingManager: " + error);
-            OnJoinServerFailed?.Invoke(error);
+            Debug.LogError("NetworkManager.Singleton is null! Cannot join server.");
+            OnJoinServerFailed?.Invoke("NetworkManager not found");
             return;
         }
         
-        if (serverInfo.inGame)
+        // Verify again that NetworkManager isn't already running
+        if (NetworkManager.Singleton.IsListening)
         {
-            string error = "Game already in progress";
-            Debug.LogWarning("MatchmakingManager: " + error);
-            OnJoinServerFailed?.Invoke(error);
+            Debug.LogError("NetworkManager is still listening! Cannot join server.");
+            OnJoinServerFailed?.Invoke("NetworkManager shutdown failed");
             return;
         }
         
-        if (serverInfo.currentPlayers >= serverInfo.maxPlayers)
+        // Configure transport for direct connection
+        UnityTransport transport = NetworkManager.Singleton.GetComponent<UnityTransport>();
+        if (transport == null)
         {
-            string error = "Server is full";
-            Debug.LogWarning("MatchmakingManager: " + error);
-            OnJoinServerFailed?.Invoke(error);
+            Debug.LogError("UnityTransport component not found! Cannot join server.");
+            OnJoinServerFailed?.Invoke("Transport not found");
             return;
         }
         
-        try
+        transport.ConnectionData.Address = serverInfo.ipAddress;
+        transport.ConnectionData.Port = serverInfo.port;
+        
+        // Connect to the server
+        bool clientStarted = NetworkManager.Singleton.StartClient();
+        
+        if (clientStarted)
         {
-            // Ensure NetworkConfig is initialized
-            if (NetworkManager.Singleton.NetworkConfig == null)
-            {
-                NetworkManager.Singleton.NetworkConfig = new NetworkConfig();
-            }
-            
-            // Register event handlers if not already registered
-            NetworkManager.Singleton.OnClientConnectedCallback -= OnClientConnected;
-            NetworkManager.Singleton.OnClientConnectedCallback += OnClientConnected;
-            NetworkManager.Singleton.OnClientDisconnectCallback -= OnClientDisconnected;
-            NetworkManager.Singleton.OnClientDisconnectCallback += OnClientDisconnected;
-            
-            // Configure the NetworkManager transport
-            UnityTransport transport = NetworkManager.Singleton.GetComponent<UnityTransport>();
-            if (transport == null)
-            {
-                Debug.Log("MatchmakingManager: Adding UnityTransport component");
-                transport = NetworkManager.Singleton.gameObject.AddComponent<UnityTransport>();
-            }
-            
-            // Set the transport in the NetworkConfig
-            NetworkManager.Singleton.NetworkConfig.NetworkTransport = transport;
-            
-            Debug.Log($"MatchmakingManager: Setting transport address to {serverInfo.ipAddress}:{serverInfo.port}");
-            transport.ConnectionData.Address = serverInfo.ipAddress;
-            transport.ConnectionData.Port = serverInfo.port;
-            
-            // Start the client
-            Debug.Log($"MatchmakingManager: Starting client connection to {serverInfo.ipAddress}:{serverInfo.port}");
-            NetworkManager.Singleton.StartClient();
-            
-            Debug.Log($"MatchmakingManager: Client connection started to {serverInfo.serverName}");
+            Debug.Log($"Client started successfully, connecting to {serverInfo.ipAddress}:{serverInfo.port}");
+            currentServerInfo = serverInfo;
         }
-        catch (Exception ex)
+        else
         {
-            string error = $"Error joining server: {ex.Message}";
-            Debug.LogError("MatchmakingManager: " + error);
-            OnJoinServerFailed?.Invoke(error);
+            Debug.LogError("Failed to start client");
+            OnJoinServerFailed?.Invoke("Failed to start client");
         }
     }
     
@@ -1658,7 +1751,16 @@ public class MatchmakingManager : MonoBehaviour
     {
         // Wait for the previous instance to fully shut down
         yield return new WaitForSeconds(1.0f);
-        JoinServer(serverInfo);
+        
+        // Check if this is a Unity Gaming Services lobby
+        if (useUnityServices && !string.IsNullOrEmpty(serverInfo.lobbyId))
+        {
+            JoinLobby(serverInfo.lobbyId);
+        }
+        else
+        {
+            JoinServerDirect(serverInfo);
+        }
     }
     
     #endregion
@@ -2059,6 +2161,453 @@ public class MatchmakingManager : MonoBehaviour
         // Find any game-specific managers that might need initialization
         // This is a generic implementation - customize as needed for your game
         Debug.Log("MatchmakingManager: Lobby initialization completed");
+    }
+
+    // Cloud Server Creation
+    private async Task<bool> CreateRelayServerAsync(string serverName)
+    {
+        if (!isServicesInitialized)
+        {
+            Debug.LogError("Unity Services not initialized. Cannot create relay server.");
+            return false;
+        }
+        
+        try
+        {
+            // Double-check that NetworkManager isn't already running
+            if (NetworkManager.Singleton.IsListening)
+            {
+                Debug.LogError("NetworkManager is still running. Cannot create a new relay server.");
+                return false;
+            }
+            
+            // Select region (auto or specific)
+            string region = relayRegionIndex > 0 && relayRegionIndex < availableRegions.Length 
+                ? availableRegions[relayRegionIndex] 
+                : null; // null = auto
+                
+            Debug.Log($"Creating Relay allocation in region: {region ?? "auto"}");
+            
+            // Create allocation
+            Allocation allocation = await RelayService.Instance.CreateAllocationAsync(maxPlayersPerServer, region);
+            
+            // Get join code
+            relayJoinCode = await RelayService.Instance.GetJoinCodeAsync(allocation.AllocationId);
+            
+            Debug.Log($"Relay server created with join code: {relayJoinCode}");
+            
+            // Set up relay transport
+            NetworkManager.Singleton.GetComponent<UnityTransport>().SetRelayServerData(new RelayServerData(allocation, "dtls"));
+            
+            // Create the lobby that will contain this relay join code
+            try
+            {
+                await CreateLobbyWithRelayCodeAsync(serverName, relayJoinCode);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Failed to create lobby, but relay allocation was successful. Continuing with host: {ex.Message}");
+                // We'll continue without the lobby - at least the relay will work
+            }
+            
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError($"Error creating relay server: {ex.Message}");
+            return false;
+        }
+    }
+    
+    // Create a lobby with the relay join code
+    private async Task CreateLobbyWithRelayCodeAsync(string serverName, string joinCode)
+    {
+        try
+        {
+            // Create lobby options
+            CreateLobbyOptions options = new CreateLobbyOptions
+            {
+                IsPrivate = false,
+                Player = new Player
+                {
+                    Data = new Dictionary<string, PlayerDataObject>
+                    {
+                        { "IsHost", new PlayerDataObject(PlayerDataObject.VisibilityOptions.Public, "true") }
+                    }
+                },
+                Data = new Dictionary<string, DataObject>
+                {
+                    { "JoinCode", new DataObject(DataObject.VisibilityOptions.Public, joinCode) },
+                    { "CurrentPlayers", new DataObject(DataObject.VisibilityOptions.Public, "1") },
+                    { "MaxPlayers", new DataObject(DataObject.VisibilityOptions.Public, maxPlayersPerServer.ToString()) },
+                    { "InGame", new DataObject(DataObject.VisibilityOptions.Public, "false") }
+                }
+            };
+            
+            // Create the lobby
+            string lobbyNameWithId = $"{serverName}#{playerId.Substring(0, 6)}";
+            currentLobby = await LobbyService.Instance.CreateLobbyAsync(lobbyNameWithId, maxPlayersPerServer, options);
+            
+            Debug.Log($"Lobby created: {currentLobby.Name}, ID: {currentLobby.Id}");
+            
+            // Start heartbeat and update coroutines
+            if (lobbyHeartbeatCoroutine != null)
+                StopCoroutine(lobbyHeartbeatCoroutine);
+                
+            lobbyHeartbeatCoroutine = StartCoroutine(LobbyHeartbeatCoroutine());
+            
+            if (lobbyUpdateCoroutine != null)
+                StopCoroutine(lobbyUpdateCoroutine);
+                
+            lobbyUpdateCoroutine = StartCoroutine(LobbyUpdateCoroutine());
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError($"Error creating lobby: {ex.Message}");
+            throw;
+        }
+    }
+    
+    // Join a Unity Relay server
+    public async Task JoinRelayServer(Lobby lobby)
+    {
+        try
+        {
+            // Verify that NetworkManager exists and isn't running
+            if (NetworkManager.Singleton == null)
+            {
+                Debug.LogError("NetworkManager.Singleton is null! Cannot join relay server.");
+                OnJoinServerFailed?.Invoke("NetworkManager not found");
+                return;
+            }
+            
+            if (NetworkManager.Singleton.IsListening)
+            {
+                Debug.LogError("NetworkManager is still listening! Shutting down first.");
+                NetworkManager.Singleton.Shutdown();
+                // Wait a moment for shutdown to complete
+                await Task.Delay(1000);
+                
+                // Check again
+                if (NetworkManager.Singleton.IsListening)
+                {
+                    Debug.LogError("NetworkManager is still listening after shutdown! Cannot join relay server.");
+                    OnJoinServerFailed?.Invoke("NetworkManager shutdown failed");
+                    return;
+                }
+            }
+            
+            // Get the relay join code from the lobby data
+            if (!lobby.Data.ContainsKey("JoinCode"))
+            {
+                Debug.LogError("Lobby does not contain a JoinCode!");
+                OnJoinServerFailed?.Invoke("Invalid lobby data - missing join code");
+                return;
+            }
+            
+            string joinCode = lobby.Data["JoinCode"].Value;
+            Debug.Log($"Joining relay server with code: {joinCode}");
+            
+            // Join the relay server
+            JoinAllocation joinAllocation = await RelayService.Instance.JoinAllocationAsync(joinCode);
+            
+            // Set up the transport
+            UnityTransport transport = NetworkManager.Singleton.GetComponent<UnityTransport>();
+            if (transport == null)
+            {
+                Debug.LogError("UnityTransport component not found! Cannot join relay server.");
+                OnJoinServerFailed?.Invoke("Transport not found");
+                return;
+            }
+            
+            transport.SetRelayServerData(new RelayServerData(joinAllocation, "dtls"));
+            
+            // Save the lobby reference
+            currentLobby = lobby;
+            
+            // Start the client
+            bool clientStarted = NetworkManager.Singleton.StartClient();
+            
+            if (clientStarted)
+            {
+                Debug.Log("Successfully connected to the relay server");
+                
+                // Create a ServerInfo object for UI
+                ServerInfo serverInfo = new ServerInfo(
+                    lobby.Name,
+                    "UGS Relay", // IP address not relevant for relay
+                    7777, // Port not relevant for relay
+                    0, // We'll get the real count later
+                    0, // We'll get the real count later
+                    false // We'll determine this later
+                );
+                serverInfo.lobbyId = lobby.Id;
+                currentServerInfo = serverInfo;
+                
+                OnJoinServerSuccess?.Invoke();
+            }
+            else
+            {
+                Debug.LogError("Failed to start client after joining relay");
+                OnJoinServerFailed?.Invoke("Failed to start client");
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError($"Error joining relay server: {ex.Message}");
+            OnJoinServerFailed?.Invoke($"Failed to join: {ex.Message}");
+        }
+    }
+    
+    // Heartbeat to keep the lobby alive
+    private IEnumerator LobbyHeartbeatCoroutine()
+    {
+        while (currentLobby != null)
+        {
+            yield return new WaitForSeconds(15); // Send heartbeat every 15 seconds
+            
+            try
+            {
+                // Start the async task without awaiting it in the coroutine
+                var heartbeatTask = SendHeartbeat(currentLobby.Id);
+                // We can't await in a coroutine, so we'll use a continuation to handle errors
+                heartbeatTask.ContinueWith(task => {
+                    if (task.IsFaulted && task.Exception != null)
+                    {
+                        Debug.LogError($"Failed to send heartbeat: {task.Exception.InnerException?.Message}");
+                        // Check if lobby exists
+                        var checkTask = CheckLobbyExists(currentLobby.Id);
+                    }
+                }, TaskContinuationOptions.OnlyOnFaulted);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Failed to send heartbeat: {ex.Message}");
+            }
+        }
+    }
+    
+    // Helper method for heartbeat
+    private async Task SendHeartbeat(string lobbyId)
+    {
+        await LobbyService.Instance.SendHeartbeatPingAsync(lobbyId);
+        Debug.Log($"Lobby heartbeat sent: {lobbyId}");
+    }
+    
+    // Helper method to check if lobby exists
+    private async Task CheckLobbyExists(string lobbyId)
+    {
+        try
+        {
+            currentLobby = await LobbyService.Instance.GetLobbyAsync(lobbyId);
+        }
+        catch
+        {
+            Debug.LogError("Lobby no longer exists, stopping heartbeat");
+            currentLobby = null;
+        }
+    }
+    
+    // Update lobby data periodically
+    private IEnumerator LobbyUpdateCoroutine()
+    {
+        while (currentLobby != null)
+        {
+            yield return new WaitForSeconds(5); // Update every 5 seconds
+            
+            if (NetworkManager.Singleton == null || currentLobby == null)
+                continue;
+                
+            try
+            {
+                // Update the lobby data with current player count
+                int currentPlayers = NetworkManager.Singleton.ConnectedClientsIds.Count;
+                
+                // Check if game is in progress using active scene
+                bool inGame = false;
+                if (NetworkManager.Singleton.SceneManager != null)
+                {
+                    // Get active scene name safely
+                    string activeScene = SceneManager.GetActiveScene().name;
+                    inGame = activeScene != lobbySceneName;
+                }
+                
+                // Start the async task without awaiting it in the coroutine
+                var updateTask = UpdateLobbyData(currentLobby.Id, currentPlayers, inGame);
+                updateTask.ContinueWith(task => {
+                    if (task.IsFaulted && task.Exception != null)
+                    {
+                        Debug.LogError($"Failed to update lobby: {task.Exception.InnerException?.Message}");
+                        // Check if lobby exists
+                        var checkTask = CheckLobbyExists(currentLobby.Id);
+                    }
+                }, TaskContinuationOptions.OnlyOnFaulted);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Exception preparing lobby update: {ex.Message}");
+            }
+        }
+    }
+    
+    // Helper method for updating lobby data
+    private async Task UpdateLobbyData(string lobbyId, int playerCount, bool inGame)
+    {
+        try {
+            UpdateLobbyOptions options = new UpdateLobbyOptions
+            {
+                Data = new Dictionary<string, DataObject>
+                {
+                    { "CurrentPlayers", new DataObject(DataObject.VisibilityOptions.Public, playerCount.ToString()) },
+                    { "InGame", new DataObject(DataObject.VisibilityOptions.Public, inGame.ToString()) }
+                }
+            };
+            
+            currentLobby = await LobbyService.Instance.UpdateLobbyAsync(lobbyId, options);
+            Debug.Log($"Lobby updated: {lobbyId}, Players: {playerCount}");
+        }
+        catch (Exception ex) {
+            Debug.LogError($"Error updating lobby data: {ex.Message}");
+        }
+    }
+    
+    // Query available lobbies
+    public async Task<List<ServerInfo>> QueryLobbiesAsync()
+    {
+        if (!isServicesInitialized)
+        {
+            Debug.LogError("Unity Services not initialized. Cannot query lobbies.");
+            return new List<ServerInfo>();
+        }
+        
+        try
+        {
+            // Options for lobby query
+            QueryLobbiesOptions options = new QueryLobbiesOptions
+            {
+                Count = 25, // Get up to 25 lobbies
+                Filters = new List<QueryFilter>
+                {
+                    new QueryFilter(QueryFilter.FieldOptions.AvailableSlots, "0", QueryFilter.OpOptions.GT)
+                },
+                Order = new List<QueryOrder>
+                {
+                    // Fix the QueryOrder constructor parameters
+                    new QueryOrder(
+                        field: Unity.Services.Lobbies.Models.QueryOrder.FieldOptions.Created, 
+                        asc: false) // false = descending order (newest first)
+                }
+            };
+            
+            // Query lobbies
+            QueryResponse response = await LobbyService.Instance.QueryLobbiesAsync(options);
+            
+            // Clear previous lobbies
+            availableLobbies.Clear();
+            
+            // Convert lobbies to server info objects
+            List<ServerInfo> serverList = new List<ServerInfo>();
+            
+            foreach (Lobby lobby in response.Results)
+            {
+                // Save reference to lobby
+                availableLobbies[lobby.Id] = lobby;
+                
+                // Extract data
+                if (!lobby.Data.ContainsKey("JoinCode") || 
+                    !lobby.Data.ContainsKey("CurrentPlayers") || 
+                    !lobby.Data.ContainsKey("MaxPlayers") ||
+                    !lobby.Data.ContainsKey("InGame"))
+                {
+                    Debug.LogWarning($"Skipping lobby with incomplete data: {lobby.Name}");
+                    continue;
+                }
+                
+                string joinCode = lobby.Data["JoinCode"].Value;
+                int.TryParse(lobby.Data["CurrentPlayers"].Value, out int currentPlayers);
+                int.TryParse(lobby.Data["MaxPlayers"].Value, out int maxPlayers);
+                bool.TryParse(lobby.Data["InGame"].Value, out bool inGame);
+                
+                // Create server info
+                ServerInfo serverInfo = new ServerInfo(
+                    lobby.Name,
+                    "UGS Relay", // IP address not relevant for relay
+                    7777, // Port not relevant for relay
+                    currentPlayers,
+                    maxPlayers,
+                    inGame
+                );
+                
+                // Store the lobby ID in the server info for lookup later
+                serverInfo.lobbyId = lobby.Id;
+                
+                serverList.Add(serverInfo);
+            }
+            
+            Debug.Log($"Found {serverList.Count} lobbies via Unity Gaming Services");
+            return serverList;
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError($"Error querying lobbies: {ex.Message}");
+            return new List<ServerInfo>();
+        }
+    }
+    
+    // Add this to clean up when leaving a server
+    public async Task LeaveServer()
+    {
+        if (currentLobby != null && isServicesInitialized)
+        {
+            try
+            {
+                // Leave the lobby
+                await LobbyService.Instance.RemovePlayerAsync(currentLobby.Id, playerId);
+                Debug.Log($"Left lobby: {currentLobby.Id}");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Error leaving lobby: {ex.Message}");
+            }
+            
+            // Clean up coroutines
+            if (lobbyHeartbeatCoroutine != null)
+            {
+                StopCoroutine(lobbyHeartbeatCoroutine);
+                lobbyHeartbeatCoroutine = null;
+            }
+            
+            if (lobbyUpdateCoroutine != null)
+            {
+                StopCoroutine(lobbyUpdateCoroutine);
+                lobbyUpdateCoroutine = null;
+            }
+            
+            currentLobby = null;
+        }
+        
+        // Shut down the network connection
+        if (NetworkManager.Singleton != null && NetworkManager.Singleton.IsListening)
+        {
+            NetworkManager.Singleton.Shutdown();
+        }
+        
+        currentServerInfo = null;
+    }
+
+    // Add a new method to join a Unity Services server
+    public void JoinLobby(string lobbyId)
+    {
+        if (!availableLobbies.ContainsKey(lobbyId))
+        {
+            Debug.LogError($"Lobby with ID {lobbyId} not found in available lobbies");
+            OnJoinServerFailed?.Invoke("Lobby not found");
+            return;
+        }
+        
+        Lobby lobby = availableLobbies[lobbyId];
+        // Start the async task without awaiting
+        var _ = JoinRelayServer(lobby);
     }
 }
 

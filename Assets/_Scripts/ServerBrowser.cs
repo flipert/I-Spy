@@ -26,6 +26,12 @@ public class ServerBrowser : MonoBehaviour
     [Header("Settings")]
     [SerializeField] private float statusMessageDuration = 3f;
     
+    [Header("Global Matchmaking")]
+    [SerializeField] private bool showGlobalMatchmaking = true;
+    [SerializeField] private GameObject loadingIndicator;
+    [SerializeField] private Button refreshGlobalButton;
+    [SerializeField] private TextMeshProUGUI globalStatusText;
+    
     // Reference to the matchmaking manager
     private MatchmakingManager matchmakingManager;
     private List<GameObject> serverEntries = new List<GameObject>();
@@ -282,6 +288,19 @@ public class ServerBrowser : MonoBehaviour
             // This avoids issues with test entries showing up temporarily
             SafeStartCoroutine(DelayedRefresh(), "DelayedRefresh");
         }
+        
+        // Make sure loading indicator is off by default
+        if (loadingIndicator != null)
+        {
+            loadingIndicator.SetActive(false);
+        }
+        
+        // Set up the global refresh button if it exists
+        if (refreshGlobalButton != null)
+        {
+            refreshGlobalButton.onClick.RemoveAllListeners();
+            refreshGlobalButton.onClick.AddListener(OnRefreshGlobalButtonClicked);
+        }
     }
     
     private IEnumerator DelayedRefresh()
@@ -371,6 +390,15 @@ public class ServerBrowser : MonoBehaviour
             return;
         }
         
+        // Show loading indicator if available
+        if (loadingIndicator != null)
+        {
+            loadingIndicator.SetActive(true);
+        }
+        
+        // Show loading status
+        ShowStatusMessage("Refreshing server list...");
+        
         // Make sure MatchmakingManager exists
         if (matchmakingManager == null)
         {
@@ -384,15 +412,10 @@ public class ServerBrowser : MonoBehaviour
             // First clear any existing entries
             ClearServerList();
             
-            // Show loading status
-            ShowStatusMessage("Refreshing server list...");
-            
             try
             {
-                // Request the MatchmakingManager to clear its cached data
+                // Request the MatchmakingManager to refresh
                 matchmakingManager.ClearAllServerData();
-                
-                // Start server discovery with a clean slate
                 matchmakingManager.StopServerDiscovery();
                 
                 // Wait a moment before starting discovery again
@@ -402,12 +425,24 @@ public class ServerBrowser : MonoBehaviour
             {
                 Debug.LogError($"ServerBrowser: Error refreshing server list: {ex.Message}");
                 ShowStatusMessage("Error refreshing servers. Try again.");
+                
+                // Hide loading indicator if available
+                if (loadingIndicator != null)
+                {
+                    loadingIndicator.SetActive(false);
+                }
             }
         }
         else
         {
             Debug.LogError("ServerBrowser: MatchmakingManager reference is missing after attempting to find it!");
             ShowStatusMessage("Error: Cannot find network manager!");
+            
+            // Hide loading indicator if available
+            if (loadingIndicator != null)
+            {
+                loadingIndicator.SetActive(false);
+            }
         }
     }
     
@@ -460,6 +495,12 @@ public class ServerBrowser : MonoBehaviour
     // Handle server list update event
     private void OnServerListUpdated(List<MatchmakingManager.ServerInfo> servers)
     {
+        // Hide loading indicator if available
+        if (loadingIndicator != null)
+        {
+            loadingIndicator.SetActive(false);
+        }
+        
         // First check if we're still active - if not, just cache the data but don't update UI
         if (!gameObject.activeInHierarchy)
         {
@@ -477,6 +518,24 @@ public class ServerBrowser : MonoBehaviour
         if (servers != null)
         {
             Debug.Log($"********** SERVER LIST UPDATED: {servers.Count} SERVERS FOUND **********");
+            
+            // Distinguish global servers and highlight them if needed
+            int localServers = 0;
+            int globalServers = 0;
+            
+            foreach (var server in servers)
+            {
+                if (!string.IsNullOrEmpty(server.lobbyId))
+                {
+                    globalServers++;
+                }
+                else
+                {
+                    localServers++;
+                }
+            }
+            
+            Debug.Log($"Found {localServers} local servers and {globalServers} global servers");
             
             if (servers.Count > 0)
             {
@@ -678,25 +737,27 @@ public class ServerBrowser : MonoBehaviour
             Debug.Log("ServerBrowser: Using the entire entry as the join button");
         }
         
+        // Mark global servers with an icon or different color
+        bool isGlobalServer = !string.IsNullOrEmpty(server.lobbyId);
+        
         // Set server information
         if (serverNameText != null)
         {
-            serverNameText.text = server.serverName;
-            Debug.Log($"ServerBrowser: Set server name text to: {server.serverName}");
-        }
-        else
-        {
-            // If no specific server name text component, try to find any TextMeshProUGUI
-            TextMeshProUGUI[] texts = entry.GetComponentsInChildren<TextMeshProUGUI>();
-            if (texts.Length > 0)
+            // Add a globe icon or [Global] prefix for global servers
+            if (isGlobalServer)
             {
-                texts[0].text = server.serverName;
-                Debug.Log($"ServerBrowser: Set first available text component to: {server.serverName}");
+                serverNameText.text = $"🌐 {server.serverName}";
+                
+                // Optionally set a different color for global servers
+                serverNameText.color = new Color(0.4f, 0.7f, 1f); // Light blue for global servers
             }
             else
             {
-                Debug.LogWarning("ServerBrowser: No text components found to display server name");
+                serverNameText.text = server.serverName;
+                serverNameText.color = Color.white; // Default color for local servers
             }
+            
+            Debug.Log($"ServerBrowser: Set server name text to: {serverNameText.text} (Global: {isGlobalServer})");
         }
         
         if (playerCountText != null)
@@ -777,7 +838,18 @@ public class ServerBrowser : MonoBehaviour
         // Show status
         ShowStatusMessage("Joining server...");
         
-        Debug.Log($"ServerBrowser: Attempting to join server at index {serverIndex}: {servers[serverIndex].serverName} at {servers[serverIndex].ipAddress}:{servers[serverIndex].port}");
+        Debug.Log($"ServerBrowser: Joining server at index {serverIndex}: {servers[serverIndex].serverName}");
+        
+        // Check if this is a global server (has a lobby ID)
+        bool isGlobalServer = !string.IsNullOrEmpty(servers[serverIndex].lobbyId);
+        if (isGlobalServer)
+        {
+            Debug.Log($"ServerBrowser: Joining global server with lobby ID: {servers[serverIndex].lobbyId}");
+        }
+        else
+        {
+            Debug.Log($"ServerBrowser: Joining local server at {servers[serverIndex].ipAddress}:{servers[serverIndex].port}");
+        }
         
         try
         {
@@ -1057,5 +1129,12 @@ public class ServerBrowser : MonoBehaviour
                 });
             }
         }
+    }
+    
+    // New method to handle global refresh button click
+    private void OnRefreshGlobalButtonClicked()
+    {
+        Debug.Log("ServerBrowser: Refreshing global server list...");
+        RefreshServerList();
     }
 }
