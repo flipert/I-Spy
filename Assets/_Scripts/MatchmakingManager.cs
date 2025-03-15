@@ -474,65 +474,140 @@ public class MatchmakingManager : MonoBehaviour
     // Helper method to clean up any existing networking resources
     private async Task CleanupNetworkingResourcesAsync()
     {
-        Debug.Log("Cleaning up networking resources before creating a new server");
+        Debug.Log("[MatchmakingManager] Beginning thorough NetworkManager cleanup");
         
-        // Shutdown NetworkManager if it's active
-        if (NetworkManager.Singleton != null && NetworkManager.Singleton.IsListening)
+        try
         {
-            Debug.Log("Shutting down existing NetworkManager session");
+            // First, clear existing server info to prevent callbacks from using it
+            currentServerInfo = null;
             
-            // Unsubscribe from events
-            NetworkManager.Singleton.OnClientConnectedCallback -= OnClientConnected;
-            NetworkManager.Singleton.OnClientDisconnectCallback -= OnClientDisconnected;
-            NetworkManager.Singleton.OnServerStarted -= OnServerStarted;
-            
-            try
+            // First check if NetworkManager exists
+            if (NetworkManager.Singleton == null)
             {
-                // Shut down the NetworkManager
-                NetworkManager.Singleton.Shutdown();
-                
-                // Wait for NetworkManager to completely shut down
-                int attempts = 0;
-                int maxAttempts = 20;
-                while (NetworkManager.Singleton.IsListening && attempts < maxAttempts)
+                Debug.Log("[MatchmakingManager] No NetworkManager instance exists - no cleanup needed");
+                return;
+            }
+            
+            // Cancel any existing Unity Gaming Services operations
+            if (currentLobby != null) 
+            {
+                Debug.Log("[MatchmakingManager] Attempting to leave existing lobby");
+                try
                 {
-                    Debug.Log($"Waiting for NetworkManager to shut down... Attempt {attempts + 1}/{maxAttempts}");
+                    await LobbyService.Instance.RemovePlayerAsync(currentLobby.Id, playerId);
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[MatchmakingManager] Non-critical error leaving lobby: {ex.Message}");
+                }
+                currentLobby = null;
+            }
+            
+            // Stop all related coroutines
+            if (lobbyHeartbeatCoroutine != null)
+            {
+                StopCoroutine(lobbyHeartbeatCoroutine);
+                lobbyHeartbeatCoroutine = null;
+            }
+            
+            if (lobbyUpdateCoroutine != null)
+            {
+                StopCoroutine(lobbyUpdateCoroutine);
+                lobbyUpdateCoroutine = null;
+            }
+            
+            // Unsubscribe from all network events before shutdown
+            if (NetworkManager.Singleton != null)
+            {
+                NetworkManager.Singleton.OnClientConnectedCallback -= OnClientConnected;
+                NetworkManager.Singleton.OnClientDisconnectCallback -= OnClientDisconnected;
+                NetworkManager.Singleton.OnServerStarted -= OnServerStarted;
+                NetworkManager.Singleton.ConnectionApprovalCallback = null;
+                // Remove this line as it's causing the compiler error - OnTransportFailure is an event
+                // NetworkManager.Singleton.OnTransportFailure = null;
+            }
+            
+            // Shut down any active transport before shutting down NetworkManager
+            UnityTransport transport = NetworkManager.Singleton?.GetComponent<UnityTransport>();
+            if (transport != null)
+            {
+                Debug.Log("[MatchmakingManager] Explicitly shutting down UnityTransport component");
+                try
+                {
+                    transport.Shutdown();
+                    // Make sure transport address is reset
                     await Task.Delay(500);
-                    attempts++;
                 }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[MatchmakingManager] Non-critical error shutting down transport: {ex.Message}");
+                }
+            }
+            
+            // Now shut down NetworkManager if it's listening
+            if (NetworkManager.Singleton.IsListening)
+            {
+                Debug.Log("[MatchmakingManager] Shutting down active NetworkManager");
                 
-                if (NetworkManager.Singleton.IsListening)
+                try
                 {
-                    Debug.LogError("NetworkManager failed to shut down completely!");
-                    // Force more aggressive cleanup
-                    GC.Collect();
-                    await Task.Delay(1000);
+                    NetworkManager.Singleton.Shutdown();
+                    
+                    // Wait for NetworkManager to completely shut down
+                    int attempts = 0;
+                    int maxAttempts = 30; // Increased timeout attempts
+                    while (NetworkManager.Singleton.IsListening && attempts < maxAttempts)
+                    {
+                        Debug.Log($"[MatchmakingManager] Waiting for NetworkManager to shut down... Attempt {attempts + 1}/{maxAttempts}");
+                        await Task.Delay(500);
+                        attempts++;
+                    }
+                    
+                    if (NetworkManager.Singleton.IsListening)
+                    {
+                        Debug.LogError("[MatchmakingManager] NetworkManager failed to shut down after multiple attempts!");
+                        // More aggressive approach - try to force a complete reset
+                        await Task.Delay(1000);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError($"[MatchmakingManager] Error shutting down NetworkManager: {ex.Message}");
                 }
             }
-            catch (Exception ex)
+            else
             {
-                Debug.LogError($"Error shutting down NetworkManager: {ex.Message}");
+                Debug.Log("[MatchmakingManager] NetworkManager not listening - no shutdown needed");
             }
-            finally
+            
+            // Force garbage collection to clean up any lingering resources
+            GC.Collect();
+            await Task.Delay(1000); // Longer delay to ensure cleanup
+            
+            // Final verification
+            if (NetworkManager.Singleton != null && NetworkManager.Singleton.IsListening)
             {
-                // Ensure we resubscribe to events
-                if (NetworkManager.Singleton != null)
-                {
-                    NetworkManager.Singleton.OnClientConnectedCallback += OnClientConnected;
-                    NetworkManager.Singleton.OnClientDisconnectCallback += OnClientDisconnected;
-                    NetworkManager.Singleton.OnServerStarted += OnServerStarted;
-                }
+                Debug.LogError("[MatchmakingManager] NetworkManager still listening after cleanup! This is unusual and may indicate a deeper issue.");
+            }
+            else
+            {
+                Debug.Log("[MatchmakingManager] NetworkManager cleanup successful");
+            }
+            
+            // Resubscribe to events if NetworkManager still exists
+            if (NetworkManager.Singleton != null)
+            {
+                NetworkManager.Singleton.OnClientConnectedCallback += OnClientConnected;
+                NetworkManager.Singleton.OnClientDisconnectCallback += OnClientDisconnected;
+                NetworkManager.Singleton.OnServerStarted += OnServerStarted;
+                NetworkManager.Singleton.ConnectionApprovalCallback = ApproveConnection;
             }
         }
-        
-        // Clear current server info
-        currentServerInfo = null;
-        
-        // Force garbage collection to clean up any lingering resources
-        GC.Collect();
-        await Task.Delay(500);
-        
-        Debug.Log("Cleanup of networking resources completed");
+        catch (Exception ex)
+        {
+            Debug.LogError($"[MatchmakingManager] Error during network resource cleanup: {ex.Message}");
+            Debug.LogException(ex);
+        }
     }
     
     private IEnumerator CreateServerAfterShutdown(string serverName, bool useUnityServicesForThis)
@@ -636,12 +711,12 @@ public class MatchmakingManager : MonoBehaviour
     
     private async Task CreateServerWithUnityServices(string serverName)
     {
-        Debug.Log("Creating server using Unity Gaming Services");
+        Debug.Log("[MatchmakingManager] Creating server using Unity Gaming Services");
         
         // Verify that NetworkManager exists and isn't already running
         if (NetworkManager.Singleton == null)
         {
-            Debug.LogError("NetworkManager.Singleton is null! Cannot create server.");
+            Debug.LogError("[MatchmakingManager] NetworkManager.Singleton is null! Cannot create server.");
             OnCreateServerFailed?.Invoke("NetworkManager not found");
             return;
         }
@@ -649,67 +724,45 @@ public class MatchmakingManager : MonoBehaviour
         // If NetworkManager is already listening, shut it down and wait for it to fully shut down
         if (NetworkManager.Singleton.IsListening)
         {
-            Debug.LogWarning("NetworkManager is still listening! Shutting down and waiting...");
+            Debug.LogWarning("[MatchmakingManager] NetworkManager is still listening! Shutting down and waiting...");
             
             // Force complete shutdown of the network manager
             try
             {
-                // Unsubscribe from events to ensure clean state
-                NetworkManager.Singleton.OnClientConnectedCallback -= OnClientConnected;
-                NetworkManager.Singleton.OnClientDisconnectCallback -= OnClientDisconnected;
-                NetworkManager.Singleton.OnServerStarted -= OnServerStarted;
+                // Use our improved cleanup method
+                await CleanupNetworkingResourcesAsync();
                 
-                // Shut down the NetworkManager
-                NetworkManager.Singleton.Shutdown();
-                
-                // Add more forceful shutdown measures
-                await Task.Delay(1000); // Longer delay to ensure shutdown completes
-                
-                // Wait for NetworkManager to completely shut down with a generous timeout
-                int attempts = 0;
-                int maxAttempts = 20;
-                while (NetworkManager.Singleton.IsListening && attempts < maxAttempts)
-                {
-                    Debug.Log($"Waiting for NetworkManager to shut down... Attempt {attempts + 1}/{maxAttempts}");
-                    await Task.Delay(500); // Longer delay to ensure shutdown completes
-                    attempts++;
-                }
-                
+                // Double check that cleanup was successful
                 if (NetworkManager.Singleton.IsListening)
                 {
-                    Debug.LogError("NetworkManager failed to shut down after multiple attempts!");
+                    Debug.LogError("[MatchmakingManager] NetworkManager still listening after cleanup! Cannot proceed.");
                     OnCreateServerFailed?.Invoke("NetworkManager shutdown failed");
                     return;
                 }
                 
-                // Additional forceful cleanup attempt
-                GC.Collect();
-                await Task.Delay(1000); // Extra delay to ensure cleanup
-                
-                // Resubscribe to events
-                NetworkManager.Singleton.OnClientConnectedCallback += OnClientConnected;
-                NetworkManager.Singleton.OnClientDisconnectCallback += OnClientDisconnected;
-                NetworkManager.Singleton.OnServerStarted += OnServerStarted;
-                
-                Debug.Log("NetworkManager successfully shut down, proceeding with server creation");
+                Debug.Log("[MatchmakingManager] NetworkManager successfully shut down, proceeding with server creation");
             }
             catch (Exception ex)
             {
-                Debug.LogError($"Error during NetworkManager shutdown: {ex.Message}");
+                Debug.LogError($"[MatchmakingManager] Error during NetworkManager shutdown: {ex.Message}");
                 OnCreateServerFailed?.Invoke("NetworkManager shutdown failed");
                 return;
             }
         }
         
+        // Set up connection approval callback
+        NetworkManager.Singleton.ConnectionApprovalCallback = ApproveConnection;
+        
         // Create relay server allocation first
+        Debug.Log("[MatchmakingManager] Setting up relay server allocation...");
         bool success = await CreateRelayServerAsync(serverName);
         
         if (success)
         {
-            // Ensure NetworkManager is fully reset before starting host
+            // Final verification before starting host
             if (NetworkManager.Singleton.IsListening)
             {
-                Debug.LogError("NetworkManager is still listening even after shutdown! Cannot start host.");
+                Debug.LogError("[MatchmakingManager] NetworkManager is still listening even after shutdown! Cannot start host.");
                 OnCreateServerFailed?.Invoke("NetworkManager shutdown failed");
                 return;
             }
@@ -726,34 +779,60 @@ public class MatchmakingManager : MonoBehaviour
             
             try
             {
-                // Final safety check before starting host
+                // Final safety check and preparation
+                Debug.Log("[MatchmakingManager] Running final checks before starting host...");
                 await Task.Delay(500);
                 
+                // Make sure all events are properly subscribed
+                NetworkManager.Singleton.OnClientConnectedCallback -= OnClientConnected;  // Avoid duplicate handlers
+                NetworkManager.Singleton.OnClientDisconnectCallback -= OnClientDisconnected;
+                NetworkManager.Singleton.OnServerStarted -= OnServerStarted;
+                
+                NetworkManager.Singleton.OnClientConnectedCallback += OnClientConnected;
+                NetworkManager.Singleton.OnClientDisconnectCallback += OnClientDisconnected;
+                NetworkManager.Singleton.OnServerStarted += OnServerStarted;
+                
                 // Start the server with Relay
+                Debug.Log("[MatchmakingManager] Starting host with Relay...");
                 bool serverStarted = NetworkManager.Singleton.StartHost();
                 
                 if (serverStarted)
                 {
-                    Debug.Log("Relay host started successfully");
-                    OnCreateServerSuccess?.Invoke();
+                    Debug.Log("[MatchmakingManager] Relay host started successfully");
+                    
+                    // Wait a moment to ensure everything is set up
+                    await Task.Delay(500);
+                    
+                    if (NetworkManager.Singleton.IsHost && NetworkManager.Singleton.IsListening)
+                    {
+                        Debug.Log("[MatchmakingManager] Host connection confirmed and listening");
+                        OnCreateServerSuccess?.Invoke();
+                    }
+                    else
+                    {
+                        Debug.LogError("[MatchmakingManager] Host started but not properly listening!");
+                        currentServerInfo = null;
+                        OnCreateServerFailed?.Invoke("Host started but not properly listening");
+                    }
                 }
                 else
                 {
-                    Debug.LogError("Failed to start host");
+                    Debug.LogError("[MatchmakingManager] Failed to start host");
                     currentServerInfo = null; // Clear the server info since it wasn't started
                     OnCreateServerFailed?.Invoke("Failed to start host");
                 }
             }
             catch (Exception ex)
             {
-                Debug.LogError($"Error starting host: {ex.Message}");
+                Debug.LogError($"[MatchmakingManager] Error starting host: {ex.Message}");
+                Debug.LogException(ex);
                 currentServerInfo = null;
                 OnCreateServerFailed?.Invoke($"Error starting host: {ex.Message}");
             }
         }
         else
         {
-            Debug.LogError("Failed to create relay server");
+            Debug.LogError("[MatchmakingManager] Failed to create relay server");
             OnCreateServerFailed?.Invoke("Failed to create relay server");
         }
     }
@@ -2513,7 +2592,7 @@ public class MatchmakingManager : MonoBehaviour
     {
         if (!isServicesInitialized)
         {
-            Debug.LogError("Unity Services not initialized. Cannot create relay server.");
+            Debug.LogError("[MatchmakingManager] Unity Services not initialized. Cannot create relay server.");
             return false;
         }
         
@@ -2522,14 +2601,34 @@ public class MatchmakingManager : MonoBehaviour
             // Extra safety check - if NetworkManager is still listening, we shouldn't proceed
             if (NetworkManager.Singleton == null)
             {
-                Debug.LogError("NetworkManager.Singleton is null! Cannot create relay server.");
+                Debug.LogError("[MatchmakingManager] NetworkManager.Singleton is null! Cannot create relay server.");
                 return false;
             }
             
             if (NetworkManager.Singleton.IsListening)
             {
-                Debug.LogError("NetworkManager is still running. Cannot create a new relay server.");
+                Debug.LogError("[MatchmakingManager] NetworkManager is still running. Cannot create a new relay server.");
                 return false;
+            }
+            
+            // Reset the transport explicitly before configuring for Relay
+            UnityTransport transport = NetworkManager.Singleton.GetComponent<UnityTransport>();
+            if (transport == null)
+            {
+                Debug.LogError("[MatchmakingManager] UnityTransport component not found on NetworkManager!");
+                return false;
+            }
+            
+            // Reset the transport to ensure it's in a clean state
+            Debug.Log("[MatchmakingManager] Resetting transport configuration before setting up relay");
+            try 
+            {
+                transport.Shutdown();
+                await Task.Delay(500); // Give time for shutdown to complete
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[MatchmakingManager] Non-critical error during transport reset: {ex.Message}");
             }
             
             // Select region (auto or specific)
@@ -2537,52 +2636,74 @@ public class MatchmakingManager : MonoBehaviour
                 ? availableRegions[relayRegionIndex] 
                 : null; // null = auto
                 
-            Debug.Log($"Creating Relay allocation in region: {region ?? "auto"}");
+            Debug.Log($"[MatchmakingManager] Creating Relay allocation in region: {region ?? "auto"}");
             
-            // Create allocation - add more detailed logging
-            Debug.Log($"Requesting allocation for {maxPlayersPerServer} players...");
-            Allocation allocation = await RelayService.Instance.CreateAllocationAsync(maxPlayersPerServer, region);
-            Debug.Log($"Allocation created successfully. Allocation ID: {allocation.AllocationId}");
+            // Create allocation with retry logic
+            Allocation allocation = null;
+            int allocationAttempts = 0;
+            int maxAllocationAttempts = 3;
             
-            // Get join code - add more detailed logging
-            Debug.Log("Requesting join code for allocation...");
+            while (allocation == null && allocationAttempts < maxAllocationAttempts)
+            {
+                try
+                {
+                    Debug.Log($"[MatchmakingManager] Requesting allocation for {maxPlayersPerServer} players (attempt {allocationAttempts+1}/{maxAllocationAttempts})...");
+                    allocation = await RelayService.Instance.CreateAllocationAsync(maxPlayersPerServer, region);
+                }
+                catch (Exception ex)
+                {
+                    allocationAttempts++;
+                    Debug.LogWarning($"[MatchmakingManager] Allocation attempt {allocationAttempts} failed: {ex.Message}");
+                    
+                    if (allocationAttempts >= maxAllocationAttempts)
+                    {
+                        Debug.LogError("[MatchmakingManager] All allocation attempts failed");
+                        throw; // Re-throw to be caught by the outer try/catch
+                    }
+                    
+                    await Task.Delay(1000); // Wait before retrying
+                }
+            }
+            
+            Debug.Log($"[MatchmakingManager] Allocation created successfully. Allocation ID: {allocation.AllocationId}");
+            
+            // Get join code
+            Debug.Log("[MatchmakingManager] Requesting join code for allocation...");
             relayJoinCode = await RelayService.Instance.GetJoinCodeAsync(allocation.AllocationId);
             
-            Debug.Log($"Relay server created with join code: {relayJoinCode}");
+            Debug.Log($"[MatchmakingManager] Relay server created with join code: {relayJoinCode}");
             
             // Store the creation time to track potential expiration (allocations typically last 10 minutes)
             PlayerPrefs.SetString("RelayJoinCode", relayJoinCode);
             PlayerPrefs.SetString("RelayAllocationTime", DateTime.UtcNow.ToString("o"));
             PlayerPrefs.Save();
             
-            // Final check before configuring transport - ensure NetworkManager is still available and not listening
+            // Final check before configuring transport
             if (NetworkManager.Singleton == null || NetworkManager.Singleton.IsListening)
             {
-                Debug.LogError("NetworkManager state changed during relay setup. Aborting.");
+                Debug.LogError("[MatchmakingManager] NetworkManager state changed during relay setup. Aborting.");
                 return false;
             }
             
-            // Set up relay transport
-            Debug.Log("Configuring transport with relay data...");
-            UnityTransport transport = NetworkManager.Singleton.GetComponent<UnityTransport>();
-            
-            if (transport == null)
-            {
-                Debug.LogError("UnityTransport component not found on NetworkManager!");
-                return false;
-            }
-            
+            // Configure transport with Relay data
+            Debug.Log("[MatchmakingManager] Configuring transport with relay data...");
             try 
             {
-                // Create relay server data
+                // Create relay server data and apply to transport
                 RelayServerData relayServerData = new RelayServerData(allocation, "dtls");
+                
+                // Ensure transport is in a clean state first
+                transport.Shutdown();
+                await Task.Delay(500); // Brief delay
+                
+                // Now apply the relay data
                 transport.SetRelayServerData(relayServerData);
                 
-                Debug.Log($"Transport configured with relay server data. Allocation ID: {allocation.AllocationId}");
+                Debug.Log($"[MatchmakingManager] Transport successfully configured with relay server data");
             }
             catch (Exception ex) 
             {
-                Debug.LogError($"Error configuring transport with relay data: {ex.Message}");
+                Debug.LogError($"[MatchmakingManager] Error configuring transport with relay data: {ex.Message}");
                 Debug.LogException(ex);
                 return false;
             }
@@ -2590,20 +2711,20 @@ public class MatchmakingManager : MonoBehaviour
             // Create the lobby that will contain this relay join code
             try
             {
-                Debug.Log($"Creating lobby '{serverName}' with relay code...");
+                Debug.Log($"[MatchmakingManager] Creating lobby '{serverName}' with relay code...");
                 await CreateLobbyWithRelayCodeAsync(serverName, relayJoinCode);
-                Debug.Log("Lobby created successfully with relay join code");
+                Debug.Log("[MatchmakingManager] Lobby created successfully with relay join code");
             }
             catch (Exception ex)
             {
-                Debug.LogError($"Failed to create lobby, but relay allocation was successful. Continuing with host: {ex.Message}");
+                Debug.LogError($"[MatchmakingManager] Failed to create lobby, but relay allocation was successful: {ex.Message}");
                 // We'll continue without the lobby - at least the relay will work
             }
             
             // Final safety check - has NetworkManager state changed during our async operations?
             if (NetworkManager.Singleton == null || NetworkManager.Singleton.IsListening)
             {
-                Debug.LogError("NetworkManager state changed unexpectedly during setup. Aborting server creation.");
+                Debug.LogError("[MatchmakingManager] NetworkManager state changed unexpectedly during setup. Aborting server creation.");
                 return false;
             }
             
@@ -2611,7 +2732,7 @@ public class MatchmakingManager : MonoBehaviour
         }
         catch (Exception ex)
         {
-            Debug.LogError($"Error creating relay server: {ex.Message}");
+            Debug.LogError($"[MatchmakingManager] Error creating relay server: {ex.Message}");
             Debug.LogException(ex); // Log the full exception for better debugging
             return false;
         }
