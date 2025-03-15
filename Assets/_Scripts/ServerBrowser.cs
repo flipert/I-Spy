@@ -41,6 +41,11 @@ public class ServerBrowser : MonoBehaviour
     // Add a private flag to track if a refresh is needed when enabled
     private bool needsRefreshOnNextEnable = false;
     
+    // Add rate limiting for refreshes
+    private float lastRefreshTime = 0f;
+    private float minRefreshInterval = 5f;
+    private bool isRefreshing = false;
+    
     private void Awake()
     {
         EnsureMatchmakingManagerExists();
@@ -382,11 +387,25 @@ public class ServerBrowser : MonoBehaviour
     // Refresh the server list
     public void RefreshServerList()
     {
+        // Check if we're refreshing too soon
+        float currentTime = Time.realtimeSinceStartup;
+        if (isRefreshing || (currentTime - lastRefreshTime < minRefreshInterval))
+        {
+            Debug.LogWarning($"Server browser refresh requested too soon. Please wait {Mathf.Max(0, minRefreshInterval - (currentTime - lastRefreshTime)):F1} seconds between refreshes.");
+            ShowStatusMessage("Please wait a moment before refreshing again...");
+            return;
+        }
+        
+        // Update the refresh timestamp
+        lastRefreshTime = currentTime;
+        isRefreshing = true;
+        
         // First ensure all references exist
         if (!EnsureReferencesExist())
         {
             Debug.LogError("ServerBrowser: Cannot refresh - references not complete");
             ShowStatusMessage("Error: Server browser not properly set up!");
+            isRefreshing = false;
             return;
         }
         
@@ -431,6 +450,7 @@ public class ServerBrowser : MonoBehaviour
                 {
                     loadingIndicator.SetActive(false);
                 }
+                isRefreshing = false;
             }
         }
         else
@@ -443,6 +463,7 @@ public class ServerBrowser : MonoBehaviour
             {
                 loadingIndicator.SetActive(false);
             }
+            isRefreshing = false;
         }
     }
     
@@ -638,6 +659,9 @@ public class ServerBrowser : MonoBehaviour
             Debug.LogError($"ServerBrowser: Unhandled error in OnServerListUpdated: {e.Message}\n{e.StackTrace}");
             ShowStatusMessage("Error updating server list");
         }
+        
+        // At the end of method, mark refresh as completed
+        isRefreshing = false;
     }
     
     // Clear the server list UI

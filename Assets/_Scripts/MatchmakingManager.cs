@@ -141,6 +141,14 @@ public class MatchmakingManager : MonoBehaviour
     private Coroutine lobbyHeartbeatCoroutine;
     private Coroutine lobbyUpdateCoroutine;
     
+    // Add a timestamp to track when we last queried lobbies
+    private float lastLobbyQueryTime = 0f;
+    // Minimum time between lobby queries in seconds to avoid rate limiting
+    [SerializeField] private float minLobbyQueryInterval = 15f; // Unity's rate limits are quite strict
+    
+    // Add flag to track if we're refreshing with Unity services
+    private bool isRefreshingWithUnityServices = false;
+    
     private async void Awake()
     {
         // Singleton setup with better logging
@@ -536,87 +544,126 @@ public class MatchmakingManager : MonoBehaviour
     
     private void CreateServerInternal(string serverName)
     {
-        Debug.Log("********** CREATING SERVER **********");
-        
-        // Ensure NetworkManager exists
-        if (NetworkManager.Singleton == null)
+        try
         {
-            Debug.LogError("********** ERROR: NetworkManager.Singleton is null! Cannot create server **********");
-            OnCreateServerFailed?.Invoke("NetworkManager not found");
-            return;
-        }
-        
-        // Configure the transport
-        UnityTransport transport = NetworkManager.Singleton.GetComponent<UnityTransport>();
-        if (transport == null)
-        {
-            Debug.Log("MatchmakingManager: Adding UnityTransport component");
-            transport = NetworkManager.Singleton.gameObject.AddComponent<UnityTransport>();
-        }
-        
-        Debug.Log("MatchmakingManager: Configuring transport");
-        // Use default settings for hosting
-        transport.ConnectionData.Address = "0.0.0.0"; // Listen on all interfaces
-        transport.ConnectionData.Port = 7777; // Default port
-        
-        // IMPORTANT: Set the transport in the NetworkConfig
-        NetworkManager.Singleton.NetworkConfig.NetworkTransport = transport;
-        
-        // Set up the NetworkManager SceneManager if null
-        if (NetworkManager.Singleton.SceneManager == null)
-        {
-            Debug.Log("MatchmakingManager: Initializing NetworkManager.SceneManager");
-            // Initialize NetworkSceneManager if needed
-            NetworkManager.Singleton.NetworkConfig.EnableSceneManagement = true;
-        }
-        
-        // Get our real local IP for discovery
-        string localIP = GetLocalIPv4();
-        Debug.Log($"********** LOCAL IP FOR SERVER: {localIP} **********");
-        
-        // Create the server info
-        currentServerInfo = new ServerInfo(
-            serverName,
-            localIP, // Use our real local IP for clients to connect to
-            7777, // Default port
-            0, // No players yet
-            maxPlayersPerServer,
-            false // Not in game yet
-        );
-        
-        Debug.Log($"********** SERVER INFO CREATED **********\n" +
-                  $"Name: {currentServerInfo.serverName}\n" +
-                  $"IP: {currentServerInfo.ipAddress}\n" +
-                  $"Port: {currentServerInfo.port}\n" +
-                  $"Players: {currentServerInfo.currentPlayers}/{currentServerInfo.maxPlayers}\n" +
-                  $"In Game: {currentServerInfo.inGame}");
-        
-        // Clear any old server registrations
-        CleanupOldServerRegistrations();
-        
-        // Register callback events if not already registered
-        NetworkManager.Singleton.OnClientConnectedCallback -= OnClientConnected;
-        NetworkManager.Singleton.OnClientConnectedCallback += OnClientConnected;
-        NetworkManager.Singleton.OnClientDisconnectCallback -= OnClientDisconnected;
-        NetworkManager.Singleton.OnClientDisconnectCallback += OnClientDisconnected;
-        NetworkManager.Singleton.OnServerStarted -= OnServerStarted;
-        NetworkManager.Singleton.OnServerStarted += OnServerStarted;
-        
-        Debug.Log($"********** STARTING HOST WITH SERVER NAME: {serverName} **********");
-        
-        try {
-            // Start the server
-            NetworkManager.Singleton.StartHost();
+            // Check if NetworkManager is already running - if so, shut it down first
+            if (NetworkManager.Singleton.IsListening)
+            {
+                Debug.LogWarning("NetworkManager is already running, shutting down first...");
+                NetworkManager.Singleton.Shutdown();
+                // Small delay to ensure shutdown completes
+                System.Threading.Thread.Sleep(100);
+            }
             
-            // Register the server so it can be discovered
-            RegisterServer();
+            // Get or add the NetworkTransport component
+            UnityTransport transport = NetworkManager.Singleton.GetComponent<UnityTransport>();
+            if (transport == null)
+            {
+                Debug.LogError("UnityTransport component not found on NetworkManager!");
+                OnCreateServerFailed?.Invoke("Missing required network components");
+                return;
+            }
             
-            Debug.Log($"********** SERVER CREATED SUCCESSFULLY: {serverName} **********");
-            OnCreateServerSuccess?.Invoke();
+            // Reset transport to ensure clean state
+            transport.Shutdown();
+            
+            // Set up local transport if not using relay
+            if (string.IsNullOrEmpty(relayJoinCode))
+            {
+                Debug.Log("Setting up direct connection transport (non-relay)");
+                // Set up transport for direct connection
+                transport.ConnectionData.Address = "0.0.0.0"; // Listen on all interfaces
+                transport.ConnectionData.Port = (ushort)discoveryPort;
+                
+                Debug.Log($"Transport configured for direct connections on port {discoveryPort}");
+            }
+            else
+            {
+                Debug.Log("Using previously configured relay transport");
+            }
+            
+            // Verify and ensure NetworkConfig is properly set
+            if (NetworkManager.Singleton.NetworkConfig == null)
+            {
+                Debug.LogError("NetworkConfig is null! Creating a new one.");
+                // You might need to create a new NetworkConfig here, but this would be unusual
+                // as NetworkManager should always have a NetworkConfig
+                NetworkManager.Singleton.NetworkConfig = new NetworkConfig();
+            }
+            
+            // Ensure transport is assigned to NetworkConfig
+            if (NetworkManager.Singleton.NetworkConfig.NetworkTransport == null || 
+                NetworkManager.Singleton.NetworkConfig.NetworkTransport != transport)
+            {
+                Debug.LogWarning("Setting NetworkTransport in NetworkConfig");
+                NetworkManager.Singleton.NetworkConfig.NetworkTransport = transport;
+            }
+            
+            // Configure NetworkConfig
+            NetworkManager.Singleton.NetworkConfig.ConnectionApproval = true;
+            
+            // Register connection approval handler
+            NetworkManager.Singleton.ConnectionApprovalCallback = ApproveConnection;
+            
+            // Register for network events
+            NetworkManager.Singleton.OnClientConnectedCallback += OnClientConnected;
+            NetworkManager.Singleton.OnClientDisconnectCallback += OnClientDisconnected;
+            NetworkManager.Singleton.OnServerStarted += OnServerStarted;
+            
+            // Create a server info object
+            currentServerInfo = new ServerInfo(
+                serverName,
+                useUnityServices ? "Relay" : GetLocalIPv4(),
+                (ushort)discoveryPort,
+                1, // Start with 1 player (the host)
+                maxPlayersPerServer,
+                false // Not in game yet
+            );
+            
+            // If using Unity Services, the lobbyId will be set later when the lobby is created
+            
+            Debug.Log($"Starting server: {serverName} - Max Players: {maxPlayersPerServer}");
+            
+            // Start the server (or host, which is both server and client)
+            bool startSuccess = NetworkManager.Singleton.StartHost();
+            
+            if (startSuccess)
+            {
+                Debug.Log($"Server started successfully: {serverName}");
+                
+                // Start broadcasting server info if not using Unity Services
+                if (!useUnityServices)
+                {
+                    StartServerBroadcast();
+                }
+                
+                // Notify listeners of success
+                OnCreateServerSuccess?.Invoke();
+            }
+            else
+            {
+                Debug.LogError("Failed to start NetworkManager host mode!");
+                
+                // Provide more detailed diagnostic info
+                Debug.LogError($"NetworkManager state: IsHost={NetworkManager.Singleton.IsHost}, IsServer={NetworkManager.Singleton.IsServer}, IsClient={NetworkManager.Singleton.IsClient}, IsListening={NetworkManager.Singleton.IsListening}");
+                
+                // Try to get transport config info
+                try {
+                    Debug.LogError($"Transport config: Address={transport.ConnectionData.Address}, Port={transport.ConnectionData.Port}");
+                }
+                catch (Exception ex) {
+                    Debug.LogError($"Could not access transport config: {ex.Message}");
+                }
+                
+                // Notify listeners of failure
+                OnCreateServerFailed?.Invoke("Failed to start server");
+            }
         }
-        catch (Exception e) {
-            Debug.LogError($"********** FAILED TO START HOST: {e.Message} **********");
-            OnCreateServerFailed?.Invoke(e.Message);
+        catch (Exception ex)
+        {
+            Debug.LogError($"Error creating server: {ex.Message}");
+            Debug.LogException(ex);
+            OnCreateServerFailed?.Invoke($"Error: {ex.Message}");
         }
     }
     
@@ -1585,8 +1632,16 @@ public class MatchmakingManager : MonoBehaviour
         // Use Unity Gaming Services if enabled
         if (useUnityServices && isServicesInitialized)
         {
+            // Check if we're already in the process of refreshing with Unity Services
+            if (isRefreshingWithUnityServices)
+            {
+                Debug.LogWarning("Already refreshing with Unity Services, skipping duplicate refresh");
+                return;
+            }
+            
             try
             {
+                isRefreshingWithUnityServices = true;
                 Debug.Log("********** QUERYING UNITY GAMING SERVICES LOBBIES **********");
                 List<ServerInfo> ugsServers = await QueryLobbiesAsync();
                 availableServers.AddRange(ugsServers);
@@ -1595,6 +1650,10 @@ public class MatchmakingManager : MonoBehaviour
             catch (Exception ex)
             {
                 Debug.LogError($"Error querying UGS lobbies: {ex.Message}");
+            }
+            finally
+            {
+                isRefreshingWithUnityServices = false;
             }
         }
         
@@ -2524,6 +2583,48 @@ public class MatchmakingManager : MonoBehaviour
         
         try
         {
+            // Check if we're querying too frequently
+            float currentTime = Time.realtimeSinceStartup;
+            if (currentTime - lastLobbyQueryTime < minLobbyQueryInterval)
+            {
+                Debug.LogWarning($"Skipping lobby query due to rate limiting. Please wait {minLobbyQueryInterval - (currentTime - lastLobbyQueryTime):F1} seconds before querying again.");
+                // Return the existing cached lobbies instead of making a new request
+                List<ServerInfo> cachedServers = new List<ServerInfo>();
+                foreach (var lobbyPair in availableLobbies)
+                {
+                    Lobby lobby = lobbyPair.Value;
+                    // Use the data we already have to create server info objects
+                    if (!lobby.Data.ContainsKey("JoinCode")) continue;
+                    
+                    string joinCode = lobby.Data["JoinCode"].Value;
+                    int currentPlayers = 1;
+                    int maxPlayers = maxPlayersPerServer;
+                    bool inGame = false;
+                    
+                    if (lobby.Data.ContainsKey("CurrentPlayers"))
+                        int.TryParse(lobby.Data["CurrentPlayers"].Value, out currentPlayers);
+                    if (lobby.Data.ContainsKey("MaxPlayers"))
+                        int.TryParse(lobby.Data["MaxPlayers"].Value, out maxPlayers);
+                    if (lobby.Data.ContainsKey("InGame"))
+                        bool.TryParse(lobby.Data["InGame"].Value, out inGame);
+                    
+                    ServerInfo serverInfo = new ServerInfo(
+                        lobby.Name,
+                        "UGS Relay",
+                        7777,
+                        currentPlayers,
+                        maxPlayers,
+                        inGame
+                    );
+                    serverInfo.lobbyId = lobby.Id;
+                    cachedServers.Add(serverInfo);
+                }
+                return cachedServers;
+            }
+            
+            // Update the timestamp for the lobby query
+            lastLobbyQueryTime = currentTime;
+            
             Debug.Log("Querying available lobbies from Unity Gaming Services...");
             
             // Options for lobby query
@@ -2763,6 +2864,20 @@ public class MatchmakingManager : MonoBehaviour
     {
         try
         {
+            // Make sure Unity Services are initialized
+            if (!isServicesInitialized)
+            {
+                Debug.Log("Unity Services not initialized. Initializing now...");
+                try {
+                    await InitializeUnityServicesAsync();
+                }
+                catch (Exception ex) {
+                    Debug.LogError($"Failed to initialize Unity Services: {ex.Message}");
+                    OnJoinServerFailed?.Invoke("Failed to initialize Unity Services");
+                    return;
+                }
+            }
+            
             // Verify that NetworkManager exists and isn't running
             if (NetworkManager.Singleton == null)
             {
@@ -2786,20 +2901,33 @@ public class MatchmakingManager : MonoBehaviour
                 
                 // Wait for NetworkManager to completely shut down with a generous timeout
                 int attempts = 0;
-                int maxAttempts = 10;
+                int maxAttempts = 20; // Increased from 10 to 20
                 while (NetworkManager.Singleton.IsListening && attempts < maxAttempts)
                 {
                     Debug.Log($"Waiting for NetworkManager to shut down... Attempt {attempts + 1}/{maxAttempts}");
-                    await Task.Delay(500); // Longer delay to ensure shutdown completes
+                    await Task.Delay(300); // Shorter, more frequent checks
                     attempts++;
                 }
                 
                 if (NetworkManager.Singleton.IsListening)
                 {
                     Debug.LogError("NetworkManager failed to shut down after multiple attempts!");
+                    // Additional cleanup attempt - try to force a full shutdown
+                    try {
+                        var networkManager = NetworkManager.Singleton.gameObject;
+                        MonoBehaviour.Destroy(networkManager);
+                        await Task.Delay(500);
+                        Debug.LogWarning("Attempted to destroy NetworkManager GameObject as a last resort");
+                    }
+                    catch (Exception ex) {
+                        Debug.LogError($"Failed to destroy NetworkManager: {ex.Message}");
+                    }
                     OnJoinServerFailed?.Invoke("NetworkManager shutdown failed");
                     return;
                 }
+                
+                // Add additional delay after shutdown to ensure everything is clean
+                await Task.Delay(500);
                 
                 // Resubscribe to events
                 NetworkManager.Singleton.OnClientConnectedCallback += OnClientConnected;
@@ -2838,7 +2966,7 @@ public class MatchmakingManager : MonoBehaviour
                 // Join the relay server
                 Debug.Log($"Joining relay server with join code: {joinCode}");
                 JoinAllocation joinAllocation = await RelayService.Instance.JoinAllocationAsync(joinCode);
-                Debug.Log("Successfully created join allocation from join code");
+                Debug.Log($"Successfully created join allocation from join code. Allocation ID: {joinAllocation.AllocationId}");
                 
                 // Set up the transport
                 UnityTransport transport = NetworkManager.Singleton.GetComponent<UnityTransport>();
@@ -2849,15 +2977,23 @@ public class MatchmakingManager : MonoBehaviour
                     return;
                 }
                 
+                // Reset the transport to clear any previous state
+                Debug.Log("Resetting transport before configuring relay data...");
+                transport.Shutdown();
+                
                 try 
                 {
                     // Set up relay server data with specific protocol
+                    Debug.Log("Creating new RelayServerData with DTLS protocol...");
                     RelayServerData relayServerData = new RelayServerData(joinAllocation, "dtls");
-                    transport.SetRelayServerData(relayServerData);
                     
-                    // The UseRelayServer property doesn't exist in this version of the transport
-                    // Just log that we're using relay without checking properties
-                    Debug.Log($"Transport configured with relay server data. Allocation ID: {joinAllocation.AllocationId}");
+                    // Extra debugging for relay server data
+                    Debug.Log($"RelayServerData created. Allocation ID: {joinAllocation.AllocationId}");
+                    Debug.Log($"Connection Data - Host: {joinAllocation.RelayServer.IpV4}:{joinAllocation.RelayServer.Port}");
+                    
+                    // Set up the transport with the relay data
+                    transport.SetRelayServerData(relayServerData);
+                    Debug.Log("Successfully configured transport with relay server data");
                 }
                 catch (Exception ex)
                 {
@@ -2884,8 +3020,8 @@ public class MatchmakingManager : MonoBehaviour
                 
                 // Add additional diagnostics before starting client
                 Debug.Log($"NetworkManager state before StartClient: IsHost={NetworkManager.Singleton.IsHost}, IsServer={NetworkManager.Singleton.IsServer}, IsClient={NetworkManager.Singleton.IsClient}, IsListening={NetworkManager.Singleton.IsListening}");
-                Debug.Log($"Transport configuration: {transport.ConnectionData.Address}:{transport.ConnectionData.Port}");
                 
+                // Make sure NetworkConfig is initialized correctly
                 if (NetworkManager.Singleton.NetworkConfig == null)
                 {
                     Debug.LogError("NetworkConfig is null! Cannot start client.");
@@ -2893,6 +3029,7 @@ public class MatchmakingManager : MonoBehaviour
                     return;
                 }
                 
+                // Ensure NetworkTransport is set in the NetworkConfig
                 if (NetworkManager.Singleton.NetworkConfig.NetworkTransport == null)
                 {
                     Debug.LogError("NetworkTransport is not set in NetworkConfig! Cannot start client.");
@@ -2900,8 +3037,18 @@ public class MatchmakingManager : MonoBehaviour
                     return;
                 }
                 
-                // Ensure the NetworkConfig is using our transport
-                NetworkManager.Singleton.NetworkConfig.NetworkTransport = transport;
+                // Check if the NetworkConfig is referencing our transport 
+                if (NetworkManager.Singleton.NetworkConfig.NetworkTransport != transport) {
+                    Debug.LogWarning("NetworkConfig transport reference doesn't match our transport component. Updating reference...");
+                    NetworkManager.Singleton.NetworkConfig.NetworkTransport = transport;
+                }
+                
+                // Validate other NetworkConfig settings
+                Debug.Log($"NetworkConfig Validation - ProtocolVersion: {NetworkManager.Singleton.NetworkConfig.ProtocolVersion}");
+                Debug.Log($"NetworkConfig Validation - NetworkTransport: {(NetworkManager.Singleton.NetworkConfig.NetworkTransport != null ? "Set" : "NULL")}");
+                
+                // Try additional reset of NetworkConfig if needed
+                NetworkManager.Singleton.NetworkConfig.ConnectionApproval = true;
                 
                 // Start the client
                 Debug.Log("Starting client to connect to relay server");
@@ -2912,7 +3059,7 @@ public class MatchmakingManager : MonoBehaviour
                     
                     if (clientStarted)
                     {
-                        Debug.Log("Successfully connected to the relay server");
+                        Debug.Log("Successfully started client to connect to the relay server");
                         OnJoinServerSuccess?.Invoke();
                     }
                     else
@@ -2924,6 +3071,15 @@ public class MatchmakingManager : MonoBehaviour
                         
                         // Try to get more diagnostic info from NetworkManager
                         Debug.LogError($"NetworkManager state after failed StartClient: IsHost={NetworkManager.Singleton.IsHost}, IsServer={NetworkManager.Singleton.IsServer}, IsClient={NetworkManager.Singleton.IsClient}, IsListening={NetworkManager.Singleton.IsListening}");
+                        
+                        // Try to access transport info for more diagnostics
+                        try {
+                            var connectionData = transport.ConnectionData;
+                            Debug.Log($"Transport connection data: {connectionData.Address}:{connectionData.Port}, using Relay: {transport.Protocol == UnityTransport.ProtocolType.RelayUnityTransport}");
+                        }
+                        catch (Exception ex) {
+                            Debug.LogError($"Could not get transport connection data: {ex.Message}");
+                        }
                         
                         currentServerInfo = null; // Clear the server info since it wasn't started
                         OnJoinServerFailed?.Invoke("Failed to start client");
