@@ -412,38 +412,224 @@ public class MatchmakingManager : MonoBehaviour
     {
         Debug.Log($"Creating server: {serverName}");
         
-        // Clean up any existing server first
+        try
+        {
+            // Clean up any existing resources before creating a new server
+            await CleanupNetworkingResourcesAsync();
+            
+            // Check if we should use Unity Game Services
+            if (useUnityServices)
+            {
+                // Ensure services are initialized
+                if (!isServicesInitialized)
+                {
+                    Debug.LogWarning("Unity Services not initialized, initializing now...");
+                    try
+                    {
+                        await InitializeUnityServicesAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogError($"Failed to initialize Unity Services: {ex.Message}");
+                        OnCreateServerFailed?.Invoke("Failed to initialize Unity Services");
+                        return;
+                    }
+                }
+                
+                // If we're already hosting/client, we need to shut down first
+                if (NetworkManager.Singleton != null && NetworkManager.Singleton.IsListening)
+                {
+                    Debug.Log("Network manager is already active. Starting a coroutine to create server after shutdown.");
+                    StartCoroutine(CreateServerAfterShutdown(serverName, true));
+                }
+                else
+                {
+                    // Direct creation if NetworkManager is ready
+                    await CreateServerWithUnityServices(serverName);
+                }
+            }
+            else
+            {
+                // Using direct networking
+                if (NetworkManager.Singleton != null && NetworkManager.Singleton.IsListening)
+                {
+                    Debug.Log("Network manager is already active. Starting a coroutine to create server after shutdown.");
+                    StartCoroutine(CreateServerAfterShutdown(serverName, false));
+                }
+                else
+                {
+                    // Direct creation if NetworkManager is ready
+                    CreateServerInternal(serverName);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError($"Error in CreateServer: {ex.Message}");
+            Debug.LogException(ex);
+            OnCreateServerFailed?.Invoke($"Error creating server: {ex.Message}");
+        }
+    }
+    
+    // Helper method to clean up any existing networking resources
+    private async Task CleanupNetworkingResourcesAsync()
+    {
+        Debug.Log("Cleaning up networking resources before creating a new server");
+        
+        // Shutdown NetworkManager if it's active
         if (NetworkManager.Singleton != null && NetworkManager.Singleton.IsListening)
         {
-            Debug.Log("Shutting down existing network session first");
-            NetworkManager.Singleton.Shutdown();
-            StartCoroutine(CreateServerAfterShutdown(serverName, useUnityServices && isServicesInitialized));
-            return;
+            Debug.Log("Shutting down existing NetworkManager session");
+            
+            // Unsubscribe from events
+            NetworkManager.Singleton.OnClientConnectedCallback -= OnClientConnected;
+            NetworkManager.Singleton.OnClientDisconnectCallback -= OnClientDisconnected;
+            NetworkManager.Singleton.OnServerStarted -= OnServerStarted;
+            
+            try
+            {
+                // Shut down the NetworkManager
+                NetworkManager.Singleton.Shutdown();
+                
+                // Wait for NetworkManager to completely shut down
+                int attempts = 0;
+                int maxAttempts = 20;
+                while (NetworkManager.Singleton.IsListening && attempts < maxAttempts)
+                {
+                    Debug.Log($"Waiting for NetworkManager to shut down... Attempt {attempts + 1}/{maxAttempts}");
+                    await Task.Delay(500);
+                    attempts++;
+                }
+                
+                if (NetworkManager.Singleton.IsListening)
+                {
+                    Debug.LogError("NetworkManager failed to shut down completely!");
+                    // Force more aggressive cleanup
+                    GC.Collect();
+                    await Task.Delay(1000);
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Error shutting down NetworkManager: {ex.Message}");
+            }
+            finally
+            {
+                // Ensure we resubscribe to events
+                if (NetworkManager.Singleton != null)
+                {
+                    NetworkManager.Singleton.OnClientConnectedCallback += OnClientConnected;
+                    NetworkManager.Singleton.OnClientDisconnectCallback += OnClientDisconnected;
+                    NetworkManager.Singleton.OnServerStarted += OnServerStarted;
+                }
+            }
         }
         
-        if (useUnityServices && isServicesInitialized)
-        {
-            await CreateServerWithUnityServices(serverName);
-        }
-        else
-        {
-            // Fallback to original implementation for local networks
-            CreateServerInternal(serverName);
-        }
+        // Clear current server info
+        currentServerInfo = null;
+        
+        // Force garbage collection to clean up any lingering resources
+        GC.Collect();
+        await Task.Delay(500);
+        
+        Debug.Log("Cleanup of networking resources completed");
     }
     
     private IEnumerator CreateServerAfterShutdown(string serverName, bool useUnityServicesForThis)
     {
-        // Wait for the previous instance to fully shut down
-        yield return new WaitForSeconds(1.0f);
+        Debug.Log("Creating server after shutdown");
         
+        // Wait a bit for any pending operations to complete
+        yield return new WaitForSeconds(1f);
+        
+        // Double-check that NetworkManager exists
+        if (NetworkManager.Singleton == null)
+        {
+            Debug.LogError("NetworkManager.Singleton is null! Cannot create server after shutdown.");
+            OnCreateServerFailed?.Invoke("NetworkManager not found");
+            yield break;
+        }
+        
+        // Wait for NetworkManager to fully shut down with a timeout
+        float timeoutDuration = 15f;
+        float elapsedTime = 0f;
+        while (NetworkManager.Singleton.IsListening && elapsedTime < timeoutDuration)
+        {
+            Debug.Log($"Waiting for NetworkManager to fully shut down... ({elapsedTime:F1}/{timeoutDuration:F0}s)");
+            yield return new WaitForSeconds(0.5f);
+            elapsedTime += 0.5f;
+        }
+        
+        if (NetworkManager.Singleton.IsListening)
+        {
+            Debug.LogError("Failed to shut down NetworkManager after timeout!");
+            OnCreateServerFailed?.Invoke("NetworkManager shutdown failed");
+            yield break;
+        }
+        
+        // Additional cleanup
+        Debug.Log("NetworkManager shut down, waiting an additional moment for cleanup...");
+        yield return new WaitForSeconds(2f);
+        
+        // Force garbage collection to clean up resources
+        GC.Collect();
+        yield return null;
+        
+        Debug.Log("Proceeding to create server after successful shutdown");
+        
+        // Create the server using the appropriate method
         if (useUnityServicesForThis)
         {
-            // Start the async method but don't await it in the coroutine
-            var _ = CreateServerWithUnityServices(serverName);
+            // We need to use async/await for the Unity Services version
+            // Use a simple callback pattern to bridge between coroutine and async method
+            bool serverCreationComplete = false;
+            bool serverCreationSuccess = false;
+            string errorMessage = "";
+            
+            // Start the async operation
+            Task.Run(async () => 
+            {
+                try
+                {
+                    await CreateServerWithUnityServices(serverName);
+                    serverCreationSuccess = true;
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError($"Error in async server creation: {ex.Message}");
+                    errorMessage = ex.Message;
+                    serverCreationSuccess = false;
+                }
+                finally
+                {
+                    serverCreationComplete = true;
+                }
+            });
+            
+            // Wait for the async operation to complete
+            float asyncTimeout = 30f;
+            float asyncElapsed = 0f;
+            while (!serverCreationComplete && asyncElapsed < asyncTimeout)
+            {
+                yield return new WaitForSeconds(0.5f);
+                asyncElapsed += 0.5f;
+                Debug.Log($"Waiting for async server creation... ({asyncElapsed:F1}/{asyncTimeout:F0}s)");
+            }
+            
+            if (!serverCreationComplete)
+            {
+                Debug.LogError("Async server creation timed out!");
+                OnCreateServerFailed?.Invoke("Server creation timed out");
+            }
+            else if (!serverCreationSuccess)
+            {
+                Debug.LogError($"Async server creation failed: {errorMessage}");
+                OnCreateServerFailed?.Invoke($"Server creation failed: {errorMessage}");
+            }
         }
         else
         {
+            // Direct method for non-Unity Services version
             CreateServerInternal(serverName);
         }
     }
@@ -465,44 +651,62 @@ public class MatchmakingManager : MonoBehaviour
         {
             Debug.LogWarning("NetworkManager is still listening! Shutting down and waiting...");
             
-            // Unsubscribe and resubscribe to events to ensure clean state
-            NetworkManager.Singleton.OnClientConnectedCallback -= OnClientConnected;
-            NetworkManager.Singleton.OnClientDisconnectCallback -= OnClientDisconnected;
-            NetworkManager.Singleton.OnServerStarted -= OnServerStarted;
-            
-            // Shut down the NetworkManager
-            NetworkManager.Singleton.Shutdown();
-            
-            // Wait for NetworkManager to completely shut down with a generous timeout
-            int attempts = 0;
-            int maxAttempts = 10;
-            while (NetworkManager.Singleton.IsListening && attempts < maxAttempts)
+            // Force complete shutdown of the network manager
+            try
             {
-                Debug.Log($"Waiting for NetworkManager to shut down... Attempt {attempts + 1}/{maxAttempts}");
-                await Task.Delay(500); // Longer delay to ensure shutdown completes
-                attempts++;
+                // Unsubscribe from events to ensure clean state
+                NetworkManager.Singleton.OnClientConnectedCallback -= OnClientConnected;
+                NetworkManager.Singleton.OnClientDisconnectCallback -= OnClientDisconnected;
+                NetworkManager.Singleton.OnServerStarted -= OnServerStarted;
+                
+                // Shut down the NetworkManager
+                NetworkManager.Singleton.Shutdown();
+                
+                // Add more forceful shutdown measures
+                await Task.Delay(1000); // Longer delay to ensure shutdown completes
+                
+                // Wait for NetworkManager to completely shut down with a generous timeout
+                int attempts = 0;
+                int maxAttempts = 20;
+                while (NetworkManager.Singleton.IsListening && attempts < maxAttempts)
+                {
+                    Debug.Log($"Waiting for NetworkManager to shut down... Attempt {attempts + 1}/{maxAttempts}");
+                    await Task.Delay(500); // Longer delay to ensure shutdown completes
+                    attempts++;
+                }
+                
+                if (NetworkManager.Singleton.IsListening)
+                {
+                    Debug.LogError("NetworkManager failed to shut down after multiple attempts!");
+                    OnCreateServerFailed?.Invoke("NetworkManager shutdown failed");
+                    return;
+                }
+                
+                // Additional forceful cleanup attempt
+                GC.Collect();
+                await Task.Delay(1000); // Extra delay to ensure cleanup
+                
+                // Resubscribe to events
+                NetworkManager.Singleton.OnClientConnectedCallback += OnClientConnected;
+                NetworkManager.Singleton.OnClientDisconnectCallback += OnClientDisconnected;
+                NetworkManager.Singleton.OnServerStarted += OnServerStarted;
+                
+                Debug.Log("NetworkManager successfully shut down, proceeding with server creation");
             }
-            
-            if (NetworkManager.Singleton.IsListening)
+            catch (Exception ex)
             {
-                Debug.LogError("NetworkManager failed to shut down after multiple attempts!");
+                Debug.LogError($"Error during NetworkManager shutdown: {ex.Message}");
                 OnCreateServerFailed?.Invoke("NetworkManager shutdown failed");
                 return;
             }
-            
-            // Resubscribe to events
-            NetworkManager.Singleton.OnClientConnectedCallback += OnClientConnected;
-            NetworkManager.Singleton.OnClientDisconnectCallback += OnClientDisconnected;
-            NetworkManager.Singleton.OnServerStarted += OnServerStarted;
-            
-            Debug.Log("NetworkManager successfully shut down, proceeding with server creation");
         }
         
+        // Create relay server allocation first
         bool success = await CreateRelayServerAsync(serverName);
         
         if (success)
         {
-            // Verify again that NetworkManager isn't running before starting host
+            // Ensure NetworkManager is fully reset before starting host
             if (NetworkManager.Singleton.IsListening)
             {
                 Debug.LogError("NetworkManager is still listening even after shutdown! Cannot start host.");
@@ -520,19 +724,31 @@ public class MatchmakingManager : MonoBehaviour
                 false
             );
             
-            // Start the server with Relay
-            bool serverStarted = NetworkManager.Singleton.StartHost();
-            
-            if (serverStarted)
+            try
             {
-                Debug.Log("Relay host started successfully");
-                OnCreateServerSuccess?.Invoke();
+                // Final safety check before starting host
+                await Task.Delay(500);
+                
+                // Start the server with Relay
+                bool serverStarted = NetworkManager.Singleton.StartHost();
+                
+                if (serverStarted)
+                {
+                    Debug.Log("Relay host started successfully");
+                    OnCreateServerSuccess?.Invoke();
+                }
+                else
+                {
+                    Debug.LogError("Failed to start host");
+                    currentServerInfo = null; // Clear the server info since it wasn't started
+                    OnCreateServerFailed?.Invoke("Failed to start host");
+                }
             }
-            else
+            catch (Exception ex)
             {
-                Debug.LogError("Failed to start host");
-                currentServerInfo = null; // Clear the server info since it wasn't started
-                OnCreateServerFailed?.Invoke("Failed to start host");
+                Debug.LogError($"Error starting host: {ex.Message}");
+                currentServerInfo = null;
+                OnCreateServerFailed?.Invoke($"Error starting host: {ex.Message}");
             }
         }
         else
@@ -2303,7 +2519,13 @@ public class MatchmakingManager : MonoBehaviour
         
         try
         {
-            // Double-check that NetworkManager isn't already running
+            // Extra safety check - if NetworkManager is still listening, we shouldn't proceed
+            if (NetworkManager.Singleton == null)
+            {
+                Debug.LogError("NetworkManager.Singleton is null! Cannot create relay server.");
+                return false;
+            }
+            
             if (NetworkManager.Singleton.IsListening)
             {
                 Debug.LogError("NetworkManager is still running. Cannot create a new relay server.");
@@ -2333,9 +2555,22 @@ public class MatchmakingManager : MonoBehaviour
             PlayerPrefs.SetString("RelayAllocationTime", DateTime.UtcNow.ToString("o"));
             PlayerPrefs.Save();
             
+            // Final check before configuring transport - ensure NetworkManager is still available and not listening
+            if (NetworkManager.Singleton == null || NetworkManager.Singleton.IsListening)
+            {
+                Debug.LogError("NetworkManager state changed during relay setup. Aborting.");
+                return false;
+            }
+            
             // Set up relay transport
             Debug.Log("Configuring transport with relay data...");
             UnityTransport transport = NetworkManager.Singleton.GetComponent<UnityTransport>();
+            
+            if (transport == null)
+            {
+                Debug.LogError("UnityTransport component not found on NetworkManager!");
+                return false;
+            }
             
             try 
             {
@@ -2343,8 +2578,6 @@ public class MatchmakingManager : MonoBehaviour
                 RelayServerData relayServerData = new RelayServerData(allocation, "dtls");
                 transport.SetRelayServerData(relayServerData);
                 
-                // The UseRelayServer property doesn't exist in this version of the transport
-                // Just log that we're using relay
                 Debug.Log($"Transport configured with relay server data. Allocation ID: {allocation.AllocationId}");
             }
             catch (Exception ex) 
@@ -2365,6 +2598,13 @@ public class MatchmakingManager : MonoBehaviour
             {
                 Debug.LogError($"Failed to create lobby, but relay allocation was successful. Continuing with host: {ex.Message}");
                 // We'll continue without the lobby - at least the relay will work
+            }
+            
+            // Final safety check - has NetworkManager state changed during our async operations?
+            if (NetworkManager.Singleton == null || NetworkManager.Singleton.IsListening)
+            {
+                Debug.LogError("NetworkManager state changed unexpectedly during setup. Aborting server creation.");
+                return false;
             }
             
             return true;
@@ -2784,6 +3024,13 @@ public class MatchmakingManager : MonoBehaviour
     {
         try
         {
+            // Verify services are initialized
+            if (!isServicesInitialized)
+            {
+                Debug.LogError("Unity Services not initialized. Cannot create lobby.");
+                throw new InvalidOperationException("Unity Services not initialized");
+            }
+            
             // Create lobby options
             CreateLobbyOptions options = new CreateLobbyOptions
             {
@@ -2804,9 +3051,20 @@ public class MatchmakingManager : MonoBehaviour
                 }
             };
             
-            // Create the lobby
+            // Create the lobby with timeout protection
             string lobbyNameWithId = $"{serverName}#{playerId.Substring(0, 6)}";
-            currentLobby = await LobbyService.Instance.CreateLobbyAsync(lobbyNameWithId, maxPlayersPerServer, options);
+            
+            // Set up a task with timeout to avoid hanging if the lobby service is slow
+            var createLobbyTask = LobbyService.Instance.CreateLobbyAsync(lobbyNameWithId, maxPlayersPerServer, options);
+            var timeoutTask = Task.Delay(10000); // 10 second timeout
+            
+            if (await Task.WhenAny(createLobbyTask, timeoutTask) == timeoutTask)
+            {
+                throw new TimeoutException("Lobby creation timed out after 10 seconds");
+            }
+            
+            // Get the result
+            currentLobby = await createLobbyTask;
             
             Debug.Log($"Lobby created: {currentLobby.Name}, ID: {currentLobby.Id}");
             
@@ -2824,6 +3082,15 @@ public class MatchmakingManager : MonoBehaviour
         catch (Exception ex)
         {
             Debug.LogError($"Error creating lobby: {ex.Message}");
+            
+            // If we're in a timeout situation, we need to be more specific
+            if (ex is TimeoutException)
+            {
+                Debug.LogWarning("Lobby creation timed out. This may be due to service limitations or rate limiting.");
+            }
+            
+            // We'll rethrow the exception but log detailed info first
+            Debug.LogException(ex);
             throw;
         }
     }
