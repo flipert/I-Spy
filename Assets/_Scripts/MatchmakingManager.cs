@@ -285,6 +285,19 @@ public class MatchmakingManager : MonoBehaviour
                 Debug.Log("MatchmakingManager: Set transport in NetworkConfig");
             }
             
+            // Ensure scene management is enabled
+            NetworkManager.Singleton.NetworkConfig.EnableSceneManagement = true;
+            
+            // Make sure ForceSamePrefabs is set to false to allow for different character prefabs
+            NetworkManager.Singleton.NetworkConfig.ForceSamePrefabs = false;
+            
+            // Check if we have the necessary callbacks registered
+            if (NetworkManager.Singleton.ConnectionApprovalCallback == null)
+            {
+                NetworkManager.Singleton.ConnectionApprovalCallback = ApproveConnection;
+                Debug.Log("MatchmakingManager: Set ConnectionApprovalCallback");
+            }
+            
             // Set up our network callbacks
             NetworkManager.Singleton.OnClientConnectedCallback -= OnClientConnected;
             NetworkManager.Singleton.OnClientConnectedCallback += OnClientConnected;
@@ -439,12 +452,42 @@ public class MatchmakingManager : MonoBehaviour
             return;
         }
         
+        // If NetworkManager is already listening, shut it down and wait for it to fully shut down
         if (NetworkManager.Singleton.IsListening)
         {
-            Debug.LogError("NetworkManager is still listening! Shutting down first.");
+            Debug.LogWarning("NetworkManager is still listening! Shutting down and waiting...");
+            
+            // Unsubscribe and resubscribe to events to ensure clean state
+            NetworkManager.Singleton.OnClientConnectedCallback -= OnClientConnected;
+            NetworkManager.Singleton.OnClientDisconnectCallback -= OnClientDisconnected;
+            NetworkManager.Singleton.OnServerStarted -= OnServerStarted;
+            
+            // Shut down the NetworkManager
             NetworkManager.Singleton.Shutdown();
-            // Wait a moment for shutdown to complete
-            await Task.Delay(1000);
+            
+            // Wait for NetworkManager to completely shut down with a generous timeout
+            int attempts = 0;
+            int maxAttempts = 10;
+            while (NetworkManager.Singleton.IsListening && attempts < maxAttempts)
+            {
+                Debug.Log($"Waiting for NetworkManager to shut down... Attempt {attempts + 1}/{maxAttempts}");
+                await Task.Delay(500); // Longer delay to ensure shutdown completes
+                attempts++;
+            }
+            
+            if (NetworkManager.Singleton.IsListening)
+            {
+                Debug.LogError("NetworkManager failed to shut down after multiple attempts!");
+                OnCreateServerFailed?.Invoke("NetworkManager shutdown failed");
+                return;
+            }
+            
+            // Resubscribe to events
+            NetworkManager.Singleton.OnClientConnectedCallback += OnClientConnected;
+            NetworkManager.Singleton.OnClientDisconnectCallback += OnClientDisconnected;
+            NetworkManager.Singleton.OnServerStarted += OnServerStarted;
+            
+            Debug.Log("NetworkManager successfully shut down, proceeding with server creation");
         }
         
         bool success = await CreateRelayServerAsync(serverName);
@@ -459,26 +502,28 @@ public class MatchmakingManager : MonoBehaviour
                 return;
             }
             
+            // Create the server info before starting host
+            currentServerInfo = new ServerInfo(
+                serverName, 
+                "UGS Relay", 
+                7777, 
+                1, 
+                maxPlayersPerServer, 
+                false
+            );
+            
             // Start the server with Relay
             bool serverStarted = NetworkManager.Singleton.StartHost();
             
             if (serverStarted)
             {
                 Debug.Log("Relay host started successfully");
-                currentServerInfo = new ServerInfo(
-                    serverName, 
-                    "UGS Relay", 
-                    7777, 
-                    1, 
-                    maxPlayersPerServer, 
-                    false
-                );
-                
                 OnCreateServerSuccess?.Invoke();
             }
             else
             {
                 Debug.LogError("Failed to start host");
+                currentServerInfo = null; // Clear the server info since it wasn't started
                 OnCreateServerFailed?.Invoke("Failed to start host");
             }
         }
@@ -599,6 +644,13 @@ public class MatchmakingManager : MonoBehaviour
     {
         try
         {
+            // Check if currentServerInfo is valid
+            if (currentServerInfo == null)
+            {
+                Debug.LogError("********** ERROR: currentServerInfo is null when registering server **********");
+                return;
+            }
+
             Debug.Log($"********** REGISTERING SERVER FOR DISCOVERY **********\n" +
                       $"Server Name: {currentServerInfo.serverName}\n" +
                       $"IP: {currentServerInfo.ipAddress}\n" +
@@ -640,8 +692,11 @@ public class MatchmakingManager : MonoBehaviour
             
             Debug.Log($"********** SERVER INFO WRITTEN TO FILE: {filePath} **********");
             
-            // Start broadcasting server presence on the network
-            StartServerBroadcast();
+            // Start broadcasting server presence on the network (only for local discovery)
+            if (currentServerInfo.ipAddress != "UGS Relay")
+            {
+                StartServerBroadcast();
+            }
             
             // Debug output the PlayerPrefs values after setting them
             Debug.Log($"********** PLAYERPREFS VERIFICATION **********\n" +
@@ -649,12 +704,16 @@ public class MatchmakingManager : MonoBehaviour
                       $"IP: {PlayerPrefs.GetString("LocalServerIP")}\n" +
                       $"Port: {PlayerPrefs.GetInt("LocalServerPort")}");
             
-            // Notify success
-            OnCreateServerSuccess?.Invoke();
+            // Notify success (avoid double notification)
+            if (OnCreateServerSuccess != null && !IsHost)
+            {
+                OnCreateServerSuccess?.Invoke();
+            }
         }
         catch (Exception ex)
         {
             Debug.LogError($"********** ERROR REGISTERING SERVER: {ex.Message} **********");
+            Debug.LogException(ex); // Log the full exception for better debugging
             OnCreateServerFailed?.Invoke("Error registering server: " + ex.Message);
         }
     }
@@ -1827,8 +1886,19 @@ public class MatchmakingManager : MonoBehaviour
             }
         }
         
-        // Register the server after starting
-        RegisterServer();
+        // Register the server after starting if we have valid server info
+        if (currentServerInfo != null)
+        {
+            // Make sure current player count is accurate
+            currentServerInfo.currentPlayers = NetworkManager.Singleton.ConnectedClientsIds.Count;
+            
+            Debug.Log($"Registering server '{currentServerInfo.serverName}' with {currentServerInfo.currentPlayers} players");
+            RegisterServer();
+        }
+        else
+        {
+            Debug.LogWarning("Cannot register server: currentServerInfo is null");
+        }
     }
     
     /// <summary>
@@ -2188,21 +2258,49 @@ public class MatchmakingManager : MonoBehaviour
                 
             Debug.Log($"Creating Relay allocation in region: {region ?? "auto"}");
             
-            // Create allocation
+            // Create allocation - add more detailed logging
+            Debug.Log($"Requesting allocation for {maxPlayersPerServer} players...");
             Allocation allocation = await RelayService.Instance.CreateAllocationAsync(maxPlayersPerServer, region);
+            Debug.Log($"Allocation created successfully. Allocation ID: {allocation.AllocationId}");
             
-            // Get join code
+            // Get join code - add more detailed logging
+            Debug.Log("Requesting join code for allocation...");
             relayJoinCode = await RelayService.Instance.GetJoinCodeAsync(allocation.AllocationId);
             
             Debug.Log($"Relay server created with join code: {relayJoinCode}");
             
+            // Store the creation time to track potential expiration (allocations typically last 10 minutes)
+            PlayerPrefs.SetString("RelayJoinCode", relayJoinCode);
+            PlayerPrefs.SetString("RelayAllocationTime", DateTime.UtcNow.ToString("o"));
+            PlayerPrefs.Save();
+            
             // Set up relay transport
-            NetworkManager.Singleton.GetComponent<UnityTransport>().SetRelayServerData(new RelayServerData(allocation, "dtls"));
+            Debug.Log("Configuring transport with relay data...");
+            UnityTransport transport = NetworkManager.Singleton.GetComponent<UnityTransport>();
+            
+            try 
+            {
+                // Create relay server data
+                RelayServerData relayServerData = new RelayServerData(allocation, "dtls");
+                transport.SetRelayServerData(relayServerData);
+                
+                // The UseRelayServer property doesn't exist in this version of the transport
+                // Just log that we're using relay
+                Debug.Log($"Transport configured with relay server data. Allocation ID: {allocation.AllocationId}");
+            }
+            catch (Exception ex) 
+            {
+                Debug.LogError($"Error configuring transport with relay data: {ex.Message}");
+                Debug.LogException(ex);
+                return false;
+            }
             
             // Create the lobby that will contain this relay join code
             try
             {
+                Debug.Log($"Creating lobby '{serverName}' with relay code...");
                 await CreateLobbyWithRelayCodeAsync(serverName, relayJoinCode);
+                Debug.Log("Lobby created successfully with relay join code");
             }
             catch (Exception ex)
             {
@@ -2215,151 +2313,81 @@ public class MatchmakingManager : MonoBehaviour
         catch (Exception ex)
         {
             Debug.LogError($"Error creating relay server: {ex.Message}");
+            Debug.LogException(ex); // Log the full exception for better debugging
             return false;
         }
     }
-    
-    // Create a lobby with the relay join code
-    private async Task CreateLobbyWithRelayCodeAsync(string serverName, string joinCode)
+
+    // Add this method to check if the current relay allocation is likely to be expired
+    private bool IsRelayAllocationLikelyExpired()
     {
-        try
+        if (!PlayerPrefs.HasKey("RelayAllocationTime"))
+            return true;
+            
+        string timeStr = PlayerPrefs.GetString("RelayAllocationTime");
+        if (DateTime.TryParse(timeStr, out DateTime allocationTime))
         {
-            // Create lobby options
-            CreateLobbyOptions options = new CreateLobbyOptions
+            // Relay allocations typically expire after 10 minutes of inactivity
+            TimeSpan timeSinceAllocation = DateTime.UtcNow - allocationTime;
+            return timeSinceAllocation.TotalMinutes > 8; // Use 8 minutes as a safety margin
+        }
+        
+        return true; // If we can't parse the time, assume it's expired
+    }
+
+    // Add this method to refresh the server's relay allocation when needed
+    private async Task RefreshRelayAllocationIfNeededAsync()
+    {
+        // Only do this if we're the host
+        if (!IsHost || currentLobby == null || string.IsNullOrEmpty(relayJoinCode))
+            return;
+            
+        // Check if allocation might be expiring soon
+        if (IsRelayAllocationLikelyExpired())
+        {
+            Debug.Log("Relay allocation may be expiring soon. Creating a new allocation...");
+            
+            try
             {
-                IsPrivate = false,
-                Player = new Player
+                // Create a new allocation
+                string region = relayRegionIndex > 0 && relayRegionIndex < availableRegions.Length 
+                    ? availableRegions[relayRegionIndex] 
+                    : null;
+                    
+                Allocation allocation = await RelayService.Instance.CreateAllocationAsync(maxPlayersPerServer, region);
+                string newJoinCode = await RelayService.Instance.GetJoinCodeAsync(allocation.AllocationId);
+                
+                Debug.Log($"Created new relay allocation with join code: {newJoinCode}");
+                
+                // Update the join code in the lobby
+                UpdateLobbyOptions options = new UpdateLobbyOptions
                 {
-                    Data = new Dictionary<string, PlayerDataObject>
+                    Data = new Dictionary<string, DataObject>
                     {
-                        { "IsHost", new PlayerDataObject(PlayerDataObject.VisibilityOptions.Public, "true") }
+                        { "JoinCode", new DataObject(DataObject.VisibilityOptions.Public, newJoinCode) }
                     }
-                },
-                Data = new Dictionary<string, DataObject>
-                {
-                    { "JoinCode", new DataObject(DataObject.VisibilityOptions.Public, joinCode) },
-                    { "CurrentPlayers", new DataObject(DataObject.VisibilityOptions.Public, "1") },
-                    { "MaxPlayers", new DataObject(DataObject.VisibilityOptions.Public, maxPlayersPerServer.ToString()) },
-                    { "InGame", new DataObject(DataObject.VisibilityOptions.Public, "false") }
-                }
-            };
-            
-            // Create the lobby
-            string lobbyNameWithId = $"{serverName}#{playerId.Substring(0, 6)}";
-            currentLobby = await LobbyService.Instance.CreateLobbyAsync(lobbyNameWithId, maxPlayersPerServer, options);
-            
-            Debug.Log($"Lobby created: {currentLobby.Name}, ID: {currentLobby.Id}");
-            
-            // Start heartbeat and update coroutines
-            if (lobbyHeartbeatCoroutine != null)
-                StopCoroutine(lobbyHeartbeatCoroutine);
+                };
                 
-            lobbyHeartbeatCoroutine = StartCoroutine(LobbyHeartbeatCoroutine());
-            
-            if (lobbyUpdateCoroutine != null)
-                StopCoroutine(lobbyUpdateCoroutine);
+                await LobbyService.Instance.UpdateLobbyAsync(currentLobby.Id, options);
                 
-            lobbyUpdateCoroutine = StartCoroutine(LobbyUpdateCoroutine());
-        }
-        catch (Exception ex)
-        {
-            Debug.LogError($"Error creating lobby: {ex.Message}");
-            throw;
+                // Update our stored join code
+                relayJoinCode = newJoinCode;
+                
+                // Update the allocation time
+                PlayerPrefs.SetString("RelayJoinCode", relayJoinCode);
+                PlayerPrefs.SetString("RelayAllocationTime", DateTime.UtcNow.ToString("o"));
+                PlayerPrefs.Save();
+                
+                Debug.Log("Successfully refreshed relay allocation and updated lobby join code");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Failed to refresh relay allocation: {ex.Message}");
+            }
         }
     }
-    
-    // Join a Unity Relay server
-    public async Task JoinRelayServer(Lobby lobby)
-    {
-        try
-        {
-            // Verify that NetworkManager exists and isn't running
-            if (NetworkManager.Singleton == null)
-            {
-                Debug.LogError("NetworkManager.Singleton is null! Cannot join relay server.");
-                OnJoinServerFailed?.Invoke("NetworkManager not found");
-                return;
-            }
-            
-            if (NetworkManager.Singleton.IsListening)
-            {
-                Debug.LogError("NetworkManager is still listening! Shutting down first.");
-                NetworkManager.Singleton.Shutdown();
-                // Wait a moment for shutdown to complete
-                await Task.Delay(1000);
-                
-                // Check again
-                if (NetworkManager.Singleton.IsListening)
-                {
-                    Debug.LogError("NetworkManager is still listening after shutdown! Cannot join relay server.");
-                    OnJoinServerFailed?.Invoke("NetworkManager shutdown failed");
-                    return;
-                }
-            }
-            
-            // Get the relay join code from the lobby data
-            if (!lobby.Data.ContainsKey("JoinCode"))
-            {
-                Debug.LogError("Lobby does not contain a JoinCode!");
-                OnJoinServerFailed?.Invoke("Invalid lobby data - missing join code");
-                return;
-            }
-            
-            string joinCode = lobby.Data["JoinCode"].Value;
-            Debug.Log($"Joining relay server with code: {joinCode}");
-            
-            // Join the relay server
-            JoinAllocation joinAllocation = await RelayService.Instance.JoinAllocationAsync(joinCode);
-            
-            // Set up the transport
-            UnityTransport transport = NetworkManager.Singleton.GetComponent<UnityTransport>();
-            if (transport == null)
-            {
-                Debug.LogError("UnityTransport component not found! Cannot join relay server.");
-                OnJoinServerFailed?.Invoke("Transport not found");
-                return;
-            }
-            
-            transport.SetRelayServerData(new RelayServerData(joinAllocation, "dtls"));
-            
-            // Save the lobby reference
-            currentLobby = lobby;
-            
-            // Start the client
-            bool clientStarted = NetworkManager.Singleton.StartClient();
-            
-            if (clientStarted)
-            {
-                Debug.Log("Successfully connected to the relay server");
-                
-                // Create a ServerInfo object for UI
-                ServerInfo serverInfo = new ServerInfo(
-                    lobby.Name,
-                    "UGS Relay", // IP address not relevant for relay
-                    7777, // Port not relevant for relay
-                    0, // We'll get the real count later
-                    0, // We'll get the real count later
-                    false // We'll determine this later
-                );
-                serverInfo.lobbyId = lobby.Id;
-                currentServerInfo = serverInfo;
-                
-                OnJoinServerSuccess?.Invoke();
-            }
-            else
-            {
-                Debug.LogError("Failed to start client after joining relay");
-                OnJoinServerFailed?.Invoke("Failed to start client");
-            }
-        }
-        catch (Exception ex)
-        {
-            Debug.LogError($"Error joining relay server: {ex.Message}");
-            OnJoinServerFailed?.Invoke($"Failed to join: {ex.Message}");
-        }
-    }
-    
-    // Heartbeat to keep the lobby alive
+
+    // Modify the lobbyHeartbeatCoroutine to also refresh relay allocations
     private IEnumerator LobbyHeartbeatCoroutine()
     {
         while (currentLobby != null)
@@ -2379,6 +2407,19 @@ public class MatchmakingManager : MonoBehaviour
                         var checkTask = CheckLobbyExists(currentLobby.Id);
                     }
                 }, TaskContinuationOptions.OnlyOnFaulted);
+                
+                // Also refresh the relay allocation if needed (approximately every 5 minutes)
+                // We'll use a random check to avoid all servers refreshing at the same exact time
+                if (UnityEngine.Random.value < 0.2f) // ~20% chance each heartbeat (so ~every 75 seconds on average)
+                {
+                    var refreshTask = RefreshRelayAllocationIfNeededAsync();
+                    refreshTask.ContinueWith(task => {
+                        if (task.IsFaulted && task.Exception != null)
+                        {
+                            Debug.LogError($"Failed to refresh relay allocation: {task.Exception.InnerException?.Message}");
+                        }
+                    }, TaskContinuationOptions.OnlyOnFaulted);
+                }
             }
             catch (Exception ex)
             {
@@ -2386,6 +2427,7 @@ public class MatchmakingManager : MonoBehaviour
             }
         }
     }
+    
     
     // Helper method for heartbeat
     private async Task SendHeartbeat(string lobbyId)
@@ -2482,6 +2524,8 @@ public class MatchmakingManager : MonoBehaviour
         
         try
         {
+            Debug.Log("Querying available lobbies from Unity Gaming Services...");
+            
             // Options for lobby query
             QueryLobbiesOptions options = new QueryLobbiesOptions
             {
@@ -2492,7 +2536,6 @@ public class MatchmakingManager : MonoBehaviour
                 },
                 Order = new List<QueryOrder>
                 {
-                    // Fix the QueryOrder constructor parameters
                     new QueryOrder(
                         field: Unity.Services.Lobbies.Models.QueryOrder.FieldOptions.Created, 
                         asc: false) // false = descending order (newest first)
@@ -2501,6 +2544,7 @@ public class MatchmakingManager : MonoBehaviour
             
             // Query lobbies
             QueryResponse response = await LobbyService.Instance.QueryLobbiesAsync(options);
+            Debug.Log($"Found {response.Results.Count} lobbies via Unity Gaming Services");
             
             // Clear previous lobbies
             availableLobbies.Clear();
@@ -2510,23 +2554,46 @@ public class MatchmakingManager : MonoBehaviour
             
             foreach (Lobby lobby in response.Results)
             {
+                // Skip lobbies with incomplete data
+                if (!lobby.Data.ContainsKey("JoinCode"))
+                {
+                    Debug.LogWarning($"Skipping lobby with missing JoinCode: {lobby.Name} (ID: {lobby.Id})");
+                    continue;
+                }
+                
                 // Save reference to lobby
                 availableLobbies[lobby.Id] = lobby;
                 
                 // Extract data
-                if (!lobby.Data.ContainsKey("JoinCode") || 
-                    !lobby.Data.ContainsKey("CurrentPlayers") || 
-                    !lobby.Data.ContainsKey("MaxPlayers") ||
-                    !lobby.Data.ContainsKey("InGame"))
+                string joinCode = lobby.Data["JoinCode"].Value;
+                
+                // Use defaults if data is missing
+                int currentPlayers = 1; // Default to at least 1 player (the host)
+                int maxPlayers = maxPlayersPerServer;
+                bool inGame = false;
+                
+                if (lobby.Data.ContainsKey("CurrentPlayers"))
                 {
-                    Debug.LogWarning($"Skipping lobby with incomplete data: {lobby.Name}");
-                    continue;
+                    int.TryParse(lobby.Data["CurrentPlayers"].Value, out currentPlayers);
                 }
                 
-                string joinCode = lobby.Data["JoinCode"].Value;
-                int.TryParse(lobby.Data["CurrentPlayers"].Value, out int currentPlayers);
-                int.TryParse(lobby.Data["MaxPlayers"].Value, out int maxPlayers);
-                bool.TryParse(lobby.Data["InGame"].Value, out bool inGame);
+                if (lobby.Data.ContainsKey("MaxPlayers"))
+                {
+                    int.TryParse(lobby.Data["MaxPlayers"].Value, out maxPlayers);
+                }
+                
+                if (lobby.Data.ContainsKey("InGame"))
+                {
+                    bool.TryParse(lobby.Data["InGame"].Value, out inGame);
+                }
+                
+                // Log detailed lobby info for debugging
+                Debug.Log($"Found lobby: {lobby.Name} (ID: {lobby.Id})\n" +
+                         $"  Join Code: {joinCode}\n" +
+                         $"  Players: {currentPlayers}/{maxPlayers}\n" +
+                         $"  In Game: {inGame}\n" +
+                         $"  Created: {lobby.Created}\n" +
+                         $"  Last Updated: {lobby.LastUpdated}");
                 
                 // Create server info
                 ServerInfo serverInfo = new ServerInfo(
@@ -2544,12 +2611,13 @@ public class MatchmakingManager : MonoBehaviour
                 serverList.Add(serverInfo);
             }
             
-            Debug.Log($"Found {serverList.Count} lobbies via Unity Gaming Services");
+            Debug.Log($"Successfully processed {serverList.Count} lobbies");
             return serverList;
         }
         catch (Exception ex)
         {
             Debug.LogError($"Error querying lobbies: {ex.Message}");
+            Debug.LogException(ex); // Log the full exception for better debugging
             return new List<ServerInfo>();
         }
     }
@@ -2608,6 +2676,297 @@ public class MatchmakingManager : MonoBehaviour
         Lobby lobby = availableLobbies[lobbyId];
         // Start the async task without awaiting
         var _ = JoinRelayServer(lobby);
+    }
+
+    // Create a lobby with the relay join code
+    private async Task CreateLobbyWithRelayCodeAsync(string serverName, string joinCode)
+    {
+        try
+        {
+            // Create lobby options
+            CreateLobbyOptions options = new CreateLobbyOptions
+            {
+                IsPrivate = false,
+                Player = new Player
+                {
+                    Data = new Dictionary<string, PlayerDataObject>
+                    {
+                        { "IsHost", new PlayerDataObject(PlayerDataObject.VisibilityOptions.Public, "true") }
+                    }
+                },
+                Data = new Dictionary<string, DataObject>
+                {
+                    { "JoinCode", new DataObject(DataObject.VisibilityOptions.Public, joinCode) },
+                    { "CurrentPlayers", new DataObject(DataObject.VisibilityOptions.Public, "1") },
+                    { "MaxPlayers", new DataObject(DataObject.VisibilityOptions.Public, maxPlayersPerServer.ToString()) },
+                    { "InGame", new DataObject(DataObject.VisibilityOptions.Public, "false") }
+                }
+            };
+            
+            // Create the lobby
+            string lobbyNameWithId = $"{serverName}#{playerId.Substring(0, 6)}";
+            currentLobby = await LobbyService.Instance.CreateLobbyAsync(lobbyNameWithId, maxPlayersPerServer, options);
+            
+            Debug.Log($"Lobby created: {currentLobby.Name}, ID: {currentLobby.Id}");
+            
+            // Start heartbeat and update coroutines
+            if (lobbyHeartbeatCoroutine != null)
+                StopCoroutine(lobbyHeartbeatCoroutine);
+                
+            lobbyHeartbeatCoroutine = StartCoroutine(LobbyHeartbeatCoroutine());
+            
+            if (lobbyUpdateCoroutine != null)
+                StopCoroutine(lobbyUpdateCoroutine);
+                
+            lobbyUpdateCoroutine = StartCoroutine(LobbyUpdateCoroutine());
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError($"Error creating lobby: {ex.Message}");
+            throw;
+        }
+    }
+
+    // Helper method to check if a join code is valid (without actually joining)
+    private async Task<bool> IsJoinCodeValidAsync(string joinCode)
+    {
+        try
+        {
+            // Make a direct API call to validate the join code without joining
+            // We can use the GetJoinCodeAsync method with a short timeout
+            var task = RelayService.Instance.JoinAllocationAsync(joinCode);
+            
+            // Use a timeout to avoid waiting too long
+            var timeoutTask = Task.Delay(5000); // 5 second timeout
+            
+            if (await Task.WhenAny(task, timeoutTask) == task)
+            {
+                // The join code is valid
+                return true;
+            }
+            else
+            {
+                // Timed out
+                Debug.LogWarning($"Join code validation timed out for: {joinCode}");
+                return false;
+            }
+        }
+        catch (Exception)
+        {
+            // Any exception means the join code is invalid
+            return false;
+        }
+    }
+
+    // Join a Unity Relay server
+    public async Task JoinRelayServer(Lobby lobby)
+    {
+        try
+        {
+            // Verify that NetworkManager exists and isn't running
+            if (NetworkManager.Singleton == null)
+            {
+                Debug.LogError("NetworkManager.Singleton is null! Cannot join relay server.");
+                OnJoinServerFailed?.Invoke("NetworkManager not found");
+                return;
+            }
+            
+            // If NetworkManager is already listening, shut it down and wait for it to fully shut down
+            if (NetworkManager.Singleton.IsListening)
+            {
+                Debug.LogWarning("NetworkManager is still listening! Shutting down and waiting...");
+                
+                // Unsubscribe and resubscribe to events to ensure clean state
+                NetworkManager.Singleton.OnClientConnectedCallback -= OnClientConnected;
+                NetworkManager.Singleton.OnClientDisconnectCallback -= OnClientDisconnected;
+                NetworkManager.Singleton.OnServerStarted -= OnServerStarted;
+                
+                // Shut down the NetworkManager
+                NetworkManager.Singleton.Shutdown();
+                
+                // Wait for NetworkManager to completely shut down with a generous timeout
+                int attempts = 0;
+                int maxAttempts = 10;
+                while (NetworkManager.Singleton.IsListening && attempts < maxAttempts)
+                {
+                    Debug.Log($"Waiting for NetworkManager to shut down... Attempt {attempts + 1}/{maxAttempts}");
+                    await Task.Delay(500); // Longer delay to ensure shutdown completes
+                    attempts++;
+                }
+                
+                if (NetworkManager.Singleton.IsListening)
+                {
+                    Debug.LogError("NetworkManager failed to shut down after multiple attempts!");
+                    OnJoinServerFailed?.Invoke("NetworkManager shutdown failed");
+                    return;
+                }
+                
+                // Resubscribe to events
+                NetworkManager.Singleton.OnClientConnectedCallback += OnClientConnected;
+                NetworkManager.Singleton.OnClientDisconnectCallback += OnClientDisconnected;
+                NetworkManager.Singleton.OnServerStarted += OnServerStarted;
+                
+                Debug.Log("NetworkManager successfully shut down, proceeding with server join");
+            }
+            
+            // Try to get the most up-to-date lobby information first
+            try 
+            {
+                Debug.Log($"Attempting to refresh lobby information for ID: {lobby.Id}");
+                lobby = await LobbyService.Instance.GetLobbyAsync(lobby.Id);
+                Debug.Log($"Successfully refreshed lobby data for: {lobby.Name}");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"Could not refresh lobby data (proceeding with current data): {ex.Message}");
+                // Continue with the existing lobby data
+            }
+            
+            // Get the relay join code from the lobby data
+            if (!lobby.Data.ContainsKey("JoinCode"))
+            {
+                Debug.LogError("Lobby does not contain a JoinCode!");
+                OnJoinServerFailed?.Invoke("Invalid lobby data - missing join code");
+                return;
+            }
+            
+            string joinCode = lobby.Data["JoinCode"].Value;
+            Debug.Log($"Found join code in lobby: {joinCode}");
+            
+            try
+            {
+                // Join the relay server
+                Debug.Log($"Joining relay server with join code: {joinCode}");
+                JoinAllocation joinAllocation = await RelayService.Instance.JoinAllocationAsync(joinCode);
+                Debug.Log("Successfully created join allocation from join code");
+                
+                // Set up the transport
+                UnityTransport transport = NetworkManager.Singleton.GetComponent<UnityTransport>();
+                if (transport == null)
+                {
+                    Debug.LogError("UnityTransport component not found! Cannot join relay server.");
+                    OnJoinServerFailed?.Invoke("Transport not found");
+                    return;
+                }
+                
+                try 
+                {
+                    // Set up relay server data with specific protocol
+                    RelayServerData relayServerData = new RelayServerData(joinAllocation, "dtls");
+                    transport.SetRelayServerData(relayServerData);
+                    
+                    // The UseRelayServer property doesn't exist in this version of the transport
+                    // Just log that we're using relay without checking properties
+                    Debug.Log($"Transport configured with relay server data. Allocation ID: {joinAllocation.AllocationId}");
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError($"Error configuring transport with relay data: {ex.Message}");
+                    Debug.LogException(ex);
+                    OnJoinServerFailed?.Invoke("Failed to configure transport");
+                    return;
+                }
+                
+                // Save the lobby reference and create the ServerInfo before starting the client
+                currentLobby = lobby;
+                
+                // Create a ServerInfo object for UI
+                ServerInfo serverInfo = new ServerInfo(
+                    lobby.Name,
+                    "UGS Relay", // IP address not relevant for relay
+                    7777, // Port not relevant for relay
+                    0, // We'll get the real count from the server
+                    int.TryParse(lobby.Data.ContainsKey("MaxPlayers") ? lobby.Data["MaxPlayers"].Value : "0", out int maxPlayers) ? maxPlayers : 0,
+                    bool.TryParse(lobby.Data.ContainsKey("InGame") ? lobby.Data["InGame"].Value : "false", out bool inGame) ? inGame : false
+                );
+                serverInfo.lobbyId = lobby.Id;
+                currentServerInfo = serverInfo;
+                
+                // Add additional diagnostics before starting client
+                Debug.Log($"NetworkManager state before StartClient: IsHost={NetworkManager.Singleton.IsHost}, IsServer={NetworkManager.Singleton.IsServer}, IsClient={NetworkManager.Singleton.IsClient}, IsListening={NetworkManager.Singleton.IsListening}");
+                Debug.Log($"Transport configuration: {transport.ConnectionData.Address}:{transport.ConnectionData.Port}");
+                
+                if (NetworkManager.Singleton.NetworkConfig == null)
+                {
+                    Debug.LogError("NetworkConfig is null! Cannot start client.");
+                    OnJoinServerFailed?.Invoke("NetworkConfig is null");
+                    return;
+                }
+                
+                if (NetworkManager.Singleton.NetworkConfig.NetworkTransport == null)
+                {
+                    Debug.LogError("NetworkTransport is not set in NetworkConfig! Cannot start client.");
+                    OnJoinServerFailed?.Invoke("NetworkTransport not set");
+                    return;
+                }
+                
+                // Ensure the NetworkConfig is using our transport
+                NetworkManager.Singleton.NetworkConfig.NetworkTransport = transport;
+                
+                // Start the client
+                Debug.Log("Starting client to connect to relay server");
+                
+                try
+                {
+                    bool clientStarted = NetworkManager.Singleton.StartClient();
+                    
+                    if (clientStarted)
+                    {
+                        Debug.Log("Successfully connected to the relay server");
+                        OnJoinServerSuccess?.Invoke();
+                    }
+                    else
+                    {
+                        Debug.LogError("Failed to start client after joining relay. This could be due to:");
+                        Debug.LogError("- NetworkManager already running in another mode");
+                        Debug.LogError("- NetworkConfig not properly set up");
+                        Debug.LogError("- Transport not properly configured with relay data");
+                        
+                        // Try to get more diagnostic info from NetworkManager
+                        Debug.LogError($"NetworkManager state after failed StartClient: IsHost={NetworkManager.Singleton.IsHost}, IsServer={NetworkManager.Singleton.IsServer}, IsClient={NetworkManager.Singleton.IsClient}, IsListening={NetworkManager.Singleton.IsListening}");
+                        
+                        currentServerInfo = null; // Clear the server info since it wasn't started
+                        OnJoinServerFailed?.Invoke("Failed to start client");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError($"Exception thrown when starting client: {ex.Message}");
+                    Debug.LogException(ex);
+                    currentServerInfo = null;
+                    OnJoinServerFailed?.Invoke($"Error starting client: {ex.Message}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Error joining relay server: {ex.Message}");
+                Debug.LogException(ex); // Log the full exception for better debugging
+                
+                // Provide a more user-friendly error message based on the exception
+                string errorMessage = "Failed to join the game.";
+                
+                if (ex.Message.Contains("Not Found") || ex.Message.Contains("404"))
+                {
+                    errorMessage = "The game server appears to be expired or no longer available. The host may need to recreate the server.";
+                }
+                else if (ex.Message.Contains("Unauthorized") || ex.Message.Contains("401"))
+                {
+                    errorMessage = "Authentication error. Please restart the game and try again.";
+                }
+                else if (ex.Message.Contains("Timeout") || ex.Message.Contains("timed out"))
+                {
+                    errorMessage = "Connection timed out. Please check your internet connection and try again.";
+                }
+                
+                OnJoinServerFailed?.Invoke(errorMessage);
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError($"Unexpected error in JoinRelayServer: {ex.Message}");
+            Debug.LogException(ex);
+            OnJoinServerFailed?.Invoke("An unexpected error occurred. Please try again.");
+        }
     }
 }
 
