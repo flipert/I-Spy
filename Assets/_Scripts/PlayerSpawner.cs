@@ -1,108 +1,169 @@
+using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using Unity.Netcode;
-using System.Collections.Generic;
+using UnityEngine.SceneManagement;
 
 public class PlayerSpawner : MonoBehaviour
 {
-    [SerializeField] private GameObject playerPrefab;
+    [SerializeField] private GameObject fallbackPlayerPrefab; // Fallback prefab if no selection
     [SerializeField] private Transform[] spawnPoints;
     
-    // Keep track of spawned players
+    // Singleton instance
+    public static PlayerSpawner Instance { get; private set; }
+    
     private Dictionary<ulong, GameObject> spawnedPlayers = new Dictionary<ulong, GameObject>();
+    private bool isGameScene = false;
     
     private void Awake()
     {
-        // Make sure this object persists
-        DontDestroyOnLoad(this.gameObject);
+        // Singleton setup
+        if (Instance == null)
+        {
+            Instance = this;
+            DontDestroyOnLoad(gameObject);
+        }
+        else if (Instance != this)
+        {
+            Destroy(gameObject);
+            return;
+        }
+
+        // Setup event listeners
+        NetworkManager.Singleton.OnClientConnectedCallback += OnClientConnected;
+        SceneManager.sceneLoaded += OnSceneLoaded;
     }
     
     private void Start()
     {
-        Debug.Log("PlayerSpawner: Start");
-        
-        // Subscribe to network events when the NetworkManager is ready
-        if (NetworkManager.Singleton != null)
+        if (NetworkManager.Singleton.IsServer || NetworkManager.Singleton.IsHost)
         {
-            Debug.Log("PlayerSpawner: NetworkManager found, subscribing to events");
+            // Server setup
             NetworkManager.Singleton.OnServerStarted += OnServerStarted;
-            
-            // Also subscribe to client connected events right away if we're already a server
-            if (NetworkManager.Singleton.IsServer || NetworkManager.Singleton.IsHost)
-            {
-                Debug.Log("PlayerSpawner: We are already server/host, subscribing to client connections");
-                NetworkManager.Singleton.OnClientConnectedCallback += SpawnPlayerForClient;
-            }
         }
-        else
-        {
-            Debug.LogError("PlayerSpawner: NetworkManager.Singleton is null!");
-        }
+        
+        // Determine if we're in the game scene - but don't spawn players yet
+        // We'll wait for the scene load event
+        isGameScene = SceneManager.GetActiveScene().name == "Game"; // Update this with your game scene name
+        Debug.Log($"PlayerSpawner: Start() - Current scene is {SceneManager.GetActiveScene().name}, isGameScene = {isGameScene}");
     }
     
     private void OnDestroy()
     {
-        // Unsubscribe from events
+        // Clean up event listeners
         if (NetworkManager.Singleton != null)
         {
+            NetworkManager.Singleton.OnClientConnectedCallback -= OnClientConnected;
             NetworkManager.Singleton.OnServerStarted -= OnServerStarted;
-            NetworkManager.Singleton.OnClientConnectedCallback -= SpawnPlayerForClient;
+        }
+        SceneManager.sceneLoaded -= OnSceneLoaded;
+    }
+    
+    private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+    {
+        Debug.Log($"PlayerSpawner: Scene loaded - {scene.name}");
+        
+        // Update scene state
+        bool wasGameScene = isGameScene;
+        isGameScene = scene.name == "Game"; // Update this with your game scene name
+        
+        // Only spawn players if we've just entered the Game scene
+        if (isGameScene && !wasGameScene && (NetworkManager.Singleton.IsServer || NetworkManager.Singleton.IsHost))
+        {
+            Debug.Log("PlayerSpawner: Game scene loaded, spawning players after delay");
+            // Delay spawning slightly to ensure everything is ready
+            StartCoroutine(SpawnPlayersDelayed());
+        }
+    }
+    
+    private IEnumerator SpawnPlayersDelayed()
+    {
+        // Wait for a frame to ensure everything is initialized
+        yield return null;
+        
+        // Spawn for all connected clients
+        foreach (ulong clientId in NetworkManager.Singleton.ConnectedClientsIds)
+        {
+            // Skip if already spawned in this scene
+            if (!spawnedPlayers.ContainsKey(clientId) || spawnedPlayers[clientId] == null)
+            {
+                SpawnPlayerForClient(clientId);
+            }
         }
     }
     
     private void OnServerStarted()
     {
-        // Only the server should handle spawning
-        if (NetworkManager.Singleton.IsServer)
+        Debug.Log("PlayerSpawner: Server started");
+        // Don't spawn players here, wait for game scene to load
+    }
+    
+    private void OnClientConnected(ulong clientId)
+    {
+        if (NetworkManager.Singleton.IsServer || NetworkManager.Singleton.IsHost)
         {
-            Debug.Log("PlayerSpawner: Server started, subscribing to client connections");
+            Debug.Log($"PlayerSpawner: Client connected: {clientId}");
             
-            // Subscribe to the client connected event
-            NetworkManager.Singleton.OnClientConnectedCallback += SpawnPlayerForClient;
-            
-            // If we're the host, spawn our own player
-            if (NetworkManager.Singleton.IsHost)
+            // Only spawn players if we're in the game scene
+            if (isGameScene)
             {
-                Debug.Log("PlayerSpawner: We are the host, spawning our player");
-                SpawnPlayerForClient(NetworkManager.Singleton.LocalClientId);
+                SpawnPlayerForClient(clientId);
             }
         }
     }
     
     private void SpawnPlayerForClient(ulong clientId)
     {
-        Debug.Log($"PlayerSpawner: SpawnPlayerForClient called for client {clientId}");
-        
-        // Check if we've already spawned a player for this client
-        if (spawnedPlayers.ContainsKey(clientId))
+        // Triple-check we're in the game scene
+        if (!isGameScene || SceneManager.GetActiveScene().name != "Game") // Update this with your game scene name
         {
-            Debug.LogWarning($"PlayerSpawner: Player already spawned for client {clientId}");
+            Debug.Log($"PlayerSpawner: Not in game scene, skipping player spawn for client {clientId}");
             return;
         }
         
-        // Choose a spawn point
+        if (spawnedPlayers.ContainsKey(clientId) && spawnedPlayers[clientId] != null)
+        {
+            Debug.Log($"PlayerSpawner: Player for client {clientId} already spawned");
+            return;
+        }
+        
         Transform spawnPoint = GetRandomSpawnPoint();
+        Vector3 spawnPosition = spawnPoint != null ? spawnPoint.position : Vector3.zero;
+        Quaternion spawnRotation = spawnPoint != null ? spawnPoint.rotation : Quaternion.identity;
         
-        Debug.Log($"PlayerSpawner: Spawning player for client {clientId} at position {spawnPoint.position}");
+        // Get the selected character prefab from NetworkManagerUI
+        GameObject characterPrefab = NetworkManagerUI.SelectedCharacterPrefab;
         
-        // Instantiate the player prefab
-        GameObject playerInstance = Instantiate(playerPrefab, spawnPoint.position, spawnPoint.rotation);
+        // Fallback to default prefab if no selection
+        if (characterPrefab == null)
+        {
+            Debug.LogWarning("PlayerSpawner: No character prefab selected, using fallback");
+            characterPrefab = fallbackPlayerPrefab;
+            
+            if (characterPrefab == null)
+            {
+                Debug.LogError("PlayerSpawner: No fallback player prefab assigned!");
+                return;
+            }
+        }
         
-        // Make the player a network object and assign ownership to the client
-        NetworkObject networkObject = playerInstance.GetComponent<NetworkObject>();
+        Debug.Log($"PlayerSpawner: Spawning character '{characterPrefab.name}' for client {clientId} at {spawnPosition}");
+        
+        // Instantiate the player
+        GameObject playerObj = Instantiate(characterPrefab, spawnPosition, spawnRotation);
+        NetworkObject networkObject = playerObj.GetComponent<NetworkObject>();
+        
         if (networkObject != null)
         {
-            // Spawn the player as a player object owned by this client
+            // Spawn on the network and assign ownership
             networkObject.SpawnAsPlayerObject(clientId);
-            
-            // Track this spawned player
-            spawnedPlayers[clientId] = playerInstance;
-            
-            Debug.Log($"PlayerSpawner: Successfully spawned player for client {clientId}");
+            spawnedPlayers[clientId] = playerObj;
+            Debug.Log($"PlayerSpawner: Player spawned and assigned to client {clientId}");
         }
         else
         {
-            Debug.LogError("PlayerSpawner: Player prefab does not have a NetworkObject component!");
-            Destroy(playerInstance);
+            Debug.LogError("PlayerSpawner: Player prefab missing NetworkObject component!");
+            Destroy(playerObj);
         }
     }
     
@@ -110,13 +171,10 @@ public class PlayerSpawner : MonoBehaviour
     {
         if (spawnPoints == null || spawnPoints.Length == 0)
         {
-            // If no spawn points are set, use a default position
-            Debug.LogWarning("PlayerSpawner: No spawn points set, using PlayerSpawner transform");
-            return transform;
+            Debug.LogWarning("PlayerSpawner: No spawn points assigned!");
+            return null;
         }
         
-        // Choose a random spawn point
-        int randomIndex = Random.Range(0, spawnPoints.Length);
-        return spawnPoints[randomIndex];
+        return spawnPoints[Random.Range(0, spawnPoints.Length)];
     }
 } 
