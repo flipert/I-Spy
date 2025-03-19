@@ -20,8 +20,24 @@ public class NPCController : NetworkBehaviour
     public float rotationSpeed = 2f;
     [Tooltip("Distance threshold to consider that the destination has been reached")]
     public float destinationTolerance = 0.2f;
+    
+    // Network variables for synchronization
+    private NetworkVariable<Vector3> networkPosition = new NetworkVariable<Vector3>(Vector3.zero, 
+        NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
+    private NetworkVariable<Vector3> networkDestination = new NetworkVariable<Vector3>(Vector3.zero,
+        NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
+    private NetworkVariable<bool> networkInGroup = new NetworkVariable<bool>(false,
+        NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
+    private NetworkVariable<Color> networkTintColor = new NetworkVariable<Color>(Color.white,
+        NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
+    private NetworkVariable<bool> networkIsMoving = new NetworkVariable<bool>(false,
+        NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
+    private NetworkVariable<bool> networkSpriteFlipX = new NetworkVariable<bool>(false,
+        NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
+        
+    // Local cached values
     private Vector3 currentDestination;
-
+    
     [Header("Group Settings")]
     [Tooltip("Whether this NPC is currently part of a group")]
     public bool inGroup = false;
@@ -54,11 +70,12 @@ public class NPCController : NetworkBehaviour
     enum NPCBehavior { Walker, WalksAndGroups }
     private NPCBehavior behavior;
 
-    private void Start()
+    public override void OnNetworkSpawn()
     {
-        // Only the server should control AI movement
-        if (!IsServer) return;
-
+        base.OnNetworkSpawn();
+        Debug.Log($"NPCController spawned on network. Object Name: {gameObject.name}, NetworkObjectId: {NetworkObjectId}, IsOwner: {IsOwner}, IsServer: {IsServer}");
+        
+        // Find renderer
         npcRenderer = GetComponent<Renderer>();
         // If the root doesn't have a renderer, try finding a child named "Character"
         if(npcRenderer == null)
@@ -67,22 +84,10 @@ public class NPCController : NetworkBehaviour
             if(characterTransform != null)
             {
                 npcRenderer = characterTransform.GetComponent<Renderer>();
-                if(npcRenderer != null)
-                {
-                    Debug.Log("NPCController: Found renderer on child 'Character'.");
-                }
-                else
-                {
-                    Debug.LogWarning("NPCController: Renderer not found on child 'Character'.");
-                }
-            }
-            else
-            {
-                Debug.LogWarning("NPCController: No renderer found on root, and no child named 'Character' exists.");
             }
         }
-
-        // Get the Animator component. If it's on a child called "Character", use transform.Find.
+        
+        // Get the Animator component
         if(npcAnimator == null)
         {
             npcAnimator = GetComponent<Animator>();
@@ -95,7 +100,49 @@ public class NPCController : NetworkBehaviour
                 }
             }
         }
-
+        
+        // Subscribe to network variable change events
+        networkTintColor.OnValueChanged += OnTintColorChanged;
+        networkPosition.OnValueChanged += OnPositionChanged;
+        networkIsMoving.OnValueChanged += OnMovingChanged;
+        networkSpriteFlipX.OnValueChanged += OnSpriteFlipChanged;
+        
+        // If we are the client, apply initial values
+        if (!IsServer)
+        {
+            // Apply the current network position
+            transform.position = networkPosition.Value;
+            
+            // Apply the current tint color
+            if (npcRenderer != null)
+            {
+                SetTintColor(networkTintColor.Value);
+            }
+            
+            // Apply animation state
+            if (npcAnimator != null)
+            {
+                npcAnimator.SetBool("Running", networkIsMoving.Value);
+            }
+            
+            // Apply sprite flip
+            SpriteRenderer spriteR = npcRenderer as SpriteRenderer;
+            if (spriteR != null)
+            {
+                spriteR.flipX = networkSpriteFlipX.Value;
+            }
+        }
+        
+        // Server-only initialization
+        if (IsServer)
+        {
+            // Server-side initialization
+            ServerInit();
+        }
+    }
+    
+    private void ServerInit()
+    {
         // Automatically find forbidden area objects tagged as "Boundary" if not assigned
         if ((forbiddenAreaObjects == null || forbiddenAreaObjects.Length == 0))
         {
@@ -106,7 +153,9 @@ public class NPCController : NetworkBehaviour
         {
             // Pick a random color from the available list (up to 6 colors)
             int idx = Random.Range(0, Mathf.Min(tintColors.Length, 6));
-            SetTintColor(tintColors[idx]);
+            Color selectedColor = tintColors[idx];
+            networkTintColor.Value = selectedColor;
+            SetTintColor(selectedColor);
         }
 
         // Randomly assign behavior: 50% Walker, 50% WalksAndGroups
@@ -117,6 +166,7 @@ public class NPCController : NetworkBehaviour
             if(Random.value < 0.4f) {
                 // 40% start in a group
                 inGroup = true;
+                networkInGroup.Value = true;
                 groupingEnabled = true;
                 groupTimer = Random.Range(minGroupTime, maxGroupTime);
                 ComputeFormationTarget();
@@ -127,6 +177,7 @@ public class NPCController : NetworkBehaviour
         } else {
             // For Walker behavior, ensure not in a group
             inGroup = false;
+            networkInGroup.Value = false;
         }
 
         // Then start the routines
@@ -142,7 +193,38 @@ public class NPCController : NetworkBehaviour
         if(IsPointInForbiddenArea(transform.position)) {
             PickNewDestination();
             transform.position = currentDestination;
+            networkPosition.Value = currentDestination;
             Debug.Log("NPCController: Spawn position was inside a forbidden area. Repositioning NPC.");
+        }
+    }
+    
+    private void OnTintColorChanged(Color previousValue, Color newValue)
+    {
+        SetTintColor(newValue);
+    }
+    
+    private void OnPositionChanged(Vector3 previousValue, Vector3 newValue)
+    {
+        if (!IsServer)
+        {
+            transform.position = newValue;
+        }
+    }
+    
+    private void OnMovingChanged(bool previousValue, bool newValue)
+    {
+        if (npcAnimator != null)
+        {
+            npcAnimator.SetBool("Running", newValue);
+        }
+    }
+    
+    private void OnSpriteFlipChanged(bool previousValue, bool newValue)
+    {
+        SpriteRenderer spriteR = npcRenderer as SpriteRenderer;
+        if (spriteR != null)
+        {
+            spriteR.flipX = newValue;
         }
     }
 
@@ -179,11 +261,13 @@ public class NPCController : NetworkBehaviour
             if (!IsPointInForbiddenArea(randomPoint))
             {
                 currentDestination = randomPoint;
+                networkDestination.Value = randomPoint;
                 return;
             }
         }
         // Fallback to current position if no valid point is found
         currentDestination = transform.position;
+        networkDestination.Value = transform.position;
     }
 
     private bool IsPointInForbiddenArea(Vector3 point)
@@ -208,17 +292,25 @@ public class NPCController : NetworkBehaviour
     {
         while (true)
         {
+            if (!IsServer) yield break;
+
             if (!inGroup)
             {
                 float distance = Vector3.Distance(transform.position, currentDestination);
                 if (distance < destinationTolerance)
                 {
+                    // Update network moving state
+                    networkIsMoving.Value = false;
+                    
                     // Pause briefly at destination before picking a new one
                     yield return new WaitForSeconds(Random.Range(1f, 2f));
                     PickNewDestination();
                 }
                 else
                 {
+                    // Update network moving state
+                    networkIsMoving.Value = true;
+                    
                     // Compute movement direction towards the destination
                     Vector3 direction = (currentDestination - transform.position).normalized;
 
@@ -227,11 +319,14 @@ public class NPCController : NetworkBehaviour
                     // If the proposed position is NOT in a forbidden area, move there; otherwise, choose a new destination
                     if(!IsPointInForbiddenArea(proposedPos)) {
                         transform.position = proposedPos;
+                        networkPosition.Value = proposedPos;
+                        
                         // Flip sprite horizontally based on the movement direction if using a SpriteRenderer
                         SpriteRenderer spriteR = npcRenderer as SpriteRenderer;
                         if(spriteR != null && Mathf.Abs(direction.x) > 0.01f)
                         {
                             spriteR.flipX = (direction.x < 0);
+                            networkSpriteFlipX.Value = (direction.x < 0);
                         }
                     } else {
                         PickNewDestination();
@@ -334,7 +429,7 @@ public class NPCController : NetworkBehaviour
 
     private void Update()
     {
-        // Only the server updates movement
+        // Only the server updates movement logic
         if (!IsServer) return;
 
         if (inGroup)
@@ -343,8 +438,11 @@ public class NPCController : NetworkBehaviour
             Vector3 proposedGroupPos = Vector3.MoveTowards(transform.position, formationTargetPos, step);
             float distanceToTarget = Vector3.Distance(transform.position, formationTargetPos);
             if(distanceToTarget > destinationTolerance) {
+                networkIsMoving.Value = true;
+                
                 if(!IsPointInForbiddenArea(proposedGroupPos)) {
                     transform.position = proposedGroupPos;
+                    networkPosition.Value = proposedGroupPos;
                 }
                 // Compute direction towards the formation target
                 Vector3 groupDirection = (formationTargetPos - transform.position).normalized;
@@ -352,11 +450,12 @@ public class NPCController : NetworkBehaviour
                 SpriteRenderer spriteR = npcRenderer as SpriteRenderer;
                 if(spriteR != null && Mathf.Abs(groupDirection.x) > 0.01f) {
                     spriteR.flipX = (groupDirection.x < 0);
+                    networkSpriteFlipX.Value = (groupDirection.x < 0);
                 }
-                npcAnimator.SetBool("Running", true); // show walking animation until target reached
             } else {
                 transform.position = formationTargetPos;
-                npcAnimator.SetBool("Running", false);
+                networkPosition.Value = formationTargetPos;
+                networkIsMoving.Value = false;
                 
                 // When in position, face toward the center of the circle
                 Collider[] colliders = Physics.OverlapSphere(transform.position, groupRadius * 2f);
@@ -381,17 +480,13 @@ public class NPCController : NetworkBehaviour
                     SpriteRenderer spriteR = npcRenderer as SpriteRenderer;
                     if(spriteR != null && Mathf.Abs(directionToCenter.x) > 0.01f) {
                         spriteR.flipX = (directionToCenter.x < 0);
+                        networkSpriteFlipX.Value = (directionToCenter.x < 0);
                     }
                 }
             }
         }
 
-        // Update animation based on state
-        if(npcAnimator != null && !inGroup)
-        {
-            bool isMoving = Vector3.Distance(transform.position, currentDestination) >= destinationTolerance;
-            npcAnimator.SetBool("Running", isMoving);
-        }
+        // Server already handles animation in the movement logic with networkIsMoving
     }
 
     private void ComputeFormationTarget()
@@ -465,13 +560,6 @@ public class NPCController : NetworkBehaviour
                 }
             }
         }
-    }
-
-    public override void OnNetworkSpawn()
-    {
-        base.OnNetworkSpawn();
-        Debug.Log($"NPCController spawned on network. Object Name: {gameObject.name}, NetworkObject ID: {NetworkObjectId}");
-        // Additional network initialization can be added here if needed
     }
 
     // Add a new coroutine at the end of the class (before OnNetworkSpawn or after ComputeFormationTarget):
