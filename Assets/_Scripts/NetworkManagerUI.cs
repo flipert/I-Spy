@@ -12,9 +12,7 @@ using System.Collections.Generic;
 public class NetworkManagerUI : MonoBehaviour
 {
     [Header("UI References")]
-    [SerializeField] private Button hostButton;
-    [SerializeField] private Button clientButton;
-    [SerializeField] private TMP_InputField ipInputField;
+    [SerializeField] public TMP_InputField ipInputField;
     [SerializeField] private TextMeshProUGUI statusText;
     [SerializeField] private GameObject startupPanel;
     [SerializeField] private CanvasGroup startupCanvasGroup;
@@ -48,6 +46,9 @@ public class NetworkManagerUI : MonoBehaviour
     /// </summary>
     public GameObject[] CharacterPrefabs => characterPrefabs;
     
+    // Add a flag to track if we should show the lobby
+    private bool shouldShowLobby = false;
+    
     private void Awake()
     {
         // Singleton setup
@@ -73,23 +74,60 @@ public class NetworkManagerUI : MonoBehaviour
         // Setup character selection buttons
         SetupCharacterSelectionButtons();
         
+        // Check if NetworkManager exists, if not create one
+        if (NetworkManager.Singleton == null)
+        {
+            Debug.Log("Creating a NetworkManager as none was found in the scene.");
+            GameObject networkManagerObj = new GameObject("NetworkManager");
+            NetworkManager networkManager = networkManagerObj.AddComponent<NetworkManager>();
+            
+            // Add and configure transport
+            var transport = networkManagerObj.AddComponent<Unity.Netcode.Transports.UTP.UnityTransport>();
+            
+            // Set the transport on the NetworkManager
+            networkManager.NetworkConfig = new Unity.Netcode.NetworkConfig
+            {
+                PlayerPrefab = null,
+                ConnectionApproval = true,
+            };
+            
+            // Must explicitly set the transport
+            networkManager.NetworkConfig.NetworkTransport = transport;
+            
+            // Configure transport
+            transport.ConnectionData.Address = defaultIP;
+            transport.ConnectionData.Port = defaultPort;
+            
+            DontDestroyOnLoad(networkManagerObj);
+        }
+        
         // Make sure the NetworkManager persists between scenes
         if (NetworkManager.Singleton != null)
         {
             DontDestroyOnLoad(NetworkManager.Singleton.gameObject);
             
-            // Configure NetworkManager to prevent auto-spawning players
-            NetworkManager.Singleton.NetworkConfig.PlayerPrefab = null;
+            // Make sure NetworkConfig is not null before accessing it
+            if (NetworkManager.Singleton.NetworkConfig != null)
+            {
+                // Configure NetworkManager to prevent auto-spawning players
+                NetworkManager.Singleton.NetworkConfig.PlayerPrefab = null;
+                
+                // Enable connection approval to control when players can join
+                NetworkManager.Singleton.NetworkConfig.ConnectionApproval = true;
+            }
+            else
+            {
+                Debug.LogError("NetworkManager.Singleton.NetworkConfig is null. The NetworkManager may not be properly initialized.");
+            }
             
-            // Enable connection approval to control when players can join
-            NetworkManager.Singleton.NetworkConfig.ConnectionApproval = true;
+            // These can be outside the NetworkConfig check
             NetworkManager.Singleton.ConnectionApprovalCallback -= ApproveConnection; // Remove any previous callbacks
             NetworkManager.Singleton.ConnectionApprovalCallback += ApproveConnection;
         }
-        
-        // Set up button listeners
-        hostButton.onClick.AddListener(OnHostButtonClicked);
-        clientButton.onClick.AddListener(OnClientButtonClicked);
+        else
+        {
+            Debug.LogError("NetworkManager.Singleton is null. Make sure there is a NetworkManager in the scene.");
+        }
         
         // Set default IP
         if (ipInputField != null)
@@ -117,7 +155,7 @@ public class NetworkManagerUI : MonoBehaviour
         }
         else
         {
-            Debug.LogError("NetworkManager.Singleton is null. Make sure there is a NetworkManager in the scene.");
+            Debug.LogError("NetworkManager.Singleton is still null after attempt to create it.");
         }
     }
     
@@ -205,88 +243,6 @@ public class NetworkManagerUI : MonoBehaviour
         }
     }
     
-    private void OnHostButtonClicked()
-    {
-        // Start as host (both server and client)
-        if (NetworkManager.Singleton != null)
-        {
-            // We'll use SceneManagement to handle player spawning after scene load
-            Debug.Log("Starting host - NO player spawning until Game scene loads");
-            
-            // Double-check that player spawning is disabled and connection approval is set up
-            NetworkManager.Singleton.NetworkConfig.PlayerPrefab = null;
-            NetworkManager.Singleton.NetworkConfig.ConnectionApproval = true;
-            
-            // Make sure our callback is registered
-            NetworkManager.Singleton.ConnectionApprovalCallback -= ApproveConnection;
-            NetworkManager.Singleton.ConnectionApprovalCallback += ApproveConnection;
-            
-            NetworkManager.Singleton.StartHost();
-            
-            // Fade out the UI
-            StartCoroutine(FadeOutUI());
-            
-            // Load the game scene directly after a short delay
-            StartCoroutine(LoadGameSceneAfterDelay());
-        }
-    }
-    
-    private void OnClientButtonClicked()
-    {
-        if (NetworkManager.Singleton == null) return;
-        
-        // Make absolutely sure we don't spawn a player in main menu
-        NetworkManager.Singleton.NetworkConfig.PlayerPrefab = null;
-        NetworkManager.Singleton.NetworkConfig.ConnectionApproval = true;
-        
-        // Make sure our callback is registered (even as a client, to stay in sync with server config)
-        NetworkManager.Singleton.ConnectionApprovalCallback -= ApproveConnection;
-        NetworkManager.Singleton.ConnectionApprovalCallback += ApproveConnection;
-        
-        // Get IP from input field
-        string ipAddress = ipInputField != null ? ipInputField.text : defaultIP;
-        if (string.IsNullOrEmpty(ipAddress))
-        {
-            ipAddress = defaultIP;
-        }
-        
-        // Set the connection data
-        NetworkManager.Singleton.GetComponent<Unity.Netcode.Transports.UTP.UnityTransport>().ConnectionData.Address = ipAddress;
-        NetworkManager.Singleton.GetComponent<Unity.Netcode.Transports.UTP.UnityTransport>().ConnectionData.Port = defaultPort;
-        
-        // Start as client
-        Debug.Log("Starting client - NO player spawning until Game scene loads");
-        NetworkManager.Singleton.StartClient();
-        UpdateStatusText("Connecting to " + ipAddress + "...");
-        
-        // Fade out the UI
-        StartCoroutine(FadeOutUI());
-    }
-    
-    private IEnumerator FadeOutUI()
-    {
-        if (startupCanvasGroup == null)
-            yield break;
-            
-        float startTime = Time.time;
-        float startAlpha = startupCanvasGroup.alpha;
-        
-        while (Time.time < startTime + fadeOutDuration)
-        {
-            float t = (Time.time - startTime) / fadeOutDuration;
-            startupCanvasGroup.alpha = Mathf.Lerp(startAlpha, 0f, t);
-            yield return null;
-        }
-        
-        startupCanvasGroup.alpha = 0f;
-        startupCanvasGroup.interactable = false;
-        startupCanvasGroup.blocksRaycasts = false;
-        
-        // Optionally disable the panel after fading
-        if (startupPanel != null)
-            startupPanel.SetActive(false);
-    }
-    
     private void OnClientConnected(ulong clientId)
     {
         Debug.Log($"Client connected with ID: {clientId}, Local client ID: {NetworkManager.Singleton.LocalClientId}");
@@ -296,19 +252,45 @@ public class NetworkManagerUI : MonoBehaviour
             Debug.Log("This is our local client that connected!");
             UpdateStatusText("Connected as " + (NetworkManager.Singleton.IsHost ? "Host" : "Client"));
             
-            // If we're a client (not host), load the game scene after connection
-            if (!NetworkManager.Singleton.IsHost)
+            // Only show the lobby if the flag is set (meaning we came from the host/client panels)
+            if (shouldShowLobby)
             {
-                StartCoroutine(LoadGameSceneAfterDelay());
+                ShowLobby();
             }
         }
         else if (NetworkManager.Singleton.IsServer || NetworkManager.Singleton.IsHost)
         {
             Debug.Log($"Remote client {clientId} connected to the server");
+            
+            // Add the newly connected client to the lobby player list
+            string playerName = "Player " + clientId;
+            LobbyController.Instance?.AddPlayer(clientId, playerName);
         }
     }
     
-    private IEnumerator LoadGameSceneAfterDelay()
+    // Add a new method to show the lobby
+    private void ShowLobby()
+    {
+        // Hide the startup UI
+        if (startupPanel != null)
+        {
+            startupPanel.SetActive(false);
+        }
+        
+        // Show the lobby using LobbyController
+        LobbyController lobbyController = FindObjectOfType<LobbyController>();
+        if (lobbyController != null)
+        {
+            lobbyController.ShowLobby();
+        }
+        else
+        {
+            Debug.LogWarning("LobbyController not found!");
+        }
+    }
+    
+    // Make LoadGameSceneAfterDelay public so the LobbyController can call it when the host clicks "Start"
+    public IEnumerator LoadGameSceneAfterDelay()
     {
         yield return new WaitForSeconds(sceneLoadDelay);
         
@@ -320,7 +302,7 @@ public class NetworkManagerUI : MonoBehaviour
             NetworkManager.Singleton.SceneManager.OnLoadEventCompleted += OnGameSceneLoaded;
             
             // If we're the host/server, use NetworkManager to switch scenes
-            NetworkManager.Singleton.SceneManager.LoadScene(gameSceneName, LoadSceneMode.Single);
+            NetworkManager.Singleton.SceneManager.LoadScene(gameSceneName, UnityEngine.SceneManagement.LoadSceneMode.Single);
         }
         else if (NetworkManager.Singleton.IsClient)
         {
@@ -446,5 +428,163 @@ public class NetworkManagerUI : MonoBehaviour
         response.Position = Vector3.zero;
         response.Rotation = Quaternion.identity;
         response.Pending = false;
+    }
+    
+    public void OnHostButtonClicked()
+    {
+        // Start as host (both server and client)
+        if (NetworkManager.Singleton != null)
+        {
+            // Set the flag to show lobby after connection
+            shouldShowLobby = true;
+            
+            // We'll use SceneManagement to handle player spawning after scene load
+            Debug.Log("Starting host - NO player spawning until Game scene loads");
+            
+            // Check for and configure transport
+            var transport = NetworkManager.Singleton.GetComponent<Unity.Netcode.Transports.UTP.UnityTransport>();
+            if (transport == null)
+            {
+                Debug.LogError("Unity Transport component missing! Adding one...");
+                transport = NetworkManager.Singleton.gameObject.AddComponent<Unity.Netcode.Transports.UTP.UnityTransport>();
+            }
+            
+            // Configure transport data
+            transport.ConnectionData.Address = defaultIP;
+            transport.ConnectionData.Port = defaultPort;
+            
+            // Check if NetworkConfig is not null
+            if (NetworkManager.Singleton.NetworkConfig != null)
+            {
+                // Double-check that player spawning is disabled and connection approval is set up
+                NetworkManager.Singleton.NetworkConfig.PlayerPrefab = null;
+                NetworkManager.Singleton.NetworkConfig.ConnectionApproval = true;
+                NetworkManager.Singleton.NetworkConfig.NetworkTransport = transport;
+            }
+            else
+            {
+                Debug.LogError("NetworkManager.Singleton.NetworkConfig is null. Creating a new one.");
+                NetworkManager.Singleton.NetworkConfig = new Unity.Netcode.NetworkConfig
+                {
+                    PlayerPrefab = null,
+                    ConnectionApproval = true,
+                    NetworkTransport = transport
+                };
+            }
+            
+            // Make sure our callback is registered
+            NetworkManager.Singleton.ConnectionApprovalCallback -= ApproveConnection;
+            NetworkManager.Singleton.ConnectionApprovalCallback += ApproveConnection;
+            
+            try
+            {
+                NetworkManager.Singleton.StartHost();
+                Debug.Log("Host started successfully");
+                
+                // Fade out the UI
+                StartCoroutine(FadeOutUI());
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogError($"Failed to start host: {ex.Message}\n{ex.StackTrace}");
+            }
+        }
+        else
+        {
+            Debug.LogError("NetworkManager.Singleton is null when trying to start host!");
+        }
+    }
+    
+    public void OnClientButtonClicked()
+    {
+        if (NetworkManager.Singleton == null)
+        {
+            Debug.LogError("NetworkManager.Singleton is null when trying to start client!");
+            return;
+        }
+        
+        // Set the flag to show lobby after connection
+        shouldShowLobby = true;
+        
+        // Get IP from input field
+        string ipAddress = ipInputField != null ? ipInputField.text : defaultIP;
+        if (string.IsNullOrEmpty(ipAddress))
+        {
+            ipAddress = defaultIP;
+        }
+        
+        // Check for and configure transport
+        var transport = NetworkManager.Singleton.GetComponent<Unity.Netcode.Transports.UTP.UnityTransport>();
+        if (transport == null)
+        {
+            Debug.LogError("Unity Transport component missing! Adding one...");
+            transport = NetworkManager.Singleton.gameObject.AddComponent<Unity.Netcode.Transports.UTP.UnityTransport>();
+        }
+        
+        // Configure transport data
+        transport.ConnectionData.Address = ipAddress;
+        transport.ConnectionData.Port = defaultPort;
+        
+        // Check if NetworkConfig is not null
+        if (NetworkManager.Singleton.NetworkConfig != null)
+        {
+            // Make absolutely sure we don't spawn a player in main menu
+            NetworkManager.Singleton.NetworkConfig.PlayerPrefab = null;
+            NetworkManager.Singleton.NetworkConfig.ConnectionApproval = true;
+            NetworkManager.Singleton.NetworkConfig.NetworkTransport = transport;
+        }
+        else
+        {
+            Debug.LogError("NetworkManager.Singleton.NetworkConfig is null. Creating a new one.");
+            NetworkManager.Singleton.NetworkConfig = new Unity.Netcode.NetworkConfig
+            {
+                PlayerPrefab = null,
+                ConnectionApproval = true,
+                NetworkTransport = transport
+            };
+        }
+        
+        // Make sure our callback is registered
+        NetworkManager.Singleton.ConnectionApprovalCallback -= ApproveConnection;
+        NetworkManager.Singleton.ConnectionApprovalCallback += ApproveConnection;
+        
+        try
+        {
+            // Start as client
+            Debug.Log("Starting client - NO player spawning until Game scene loads");
+            NetworkManager.Singleton.StartClient();
+            UpdateStatusText("Connecting to " + ipAddress + "...");
+            
+            // Fade out the UI
+            StartCoroutine(FadeOutUI());
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogError($"Failed to start client: {ex.Message}\n{ex.StackTrace}");
+        }
+    }
+    
+    private IEnumerator FadeOutUI()
+    {
+        if (startupCanvasGroup == null)
+            yield break;
+            
+        float startTime = Time.time;
+        float startAlpha = startupCanvasGroup.alpha;
+        
+        while (Time.time < startTime + fadeOutDuration)
+        {
+            float t = (Time.time - startTime) / fadeOutDuration;
+            startupCanvasGroup.alpha = Mathf.Lerp(startAlpha, 0f, t);
+            yield return null;
+        }
+        
+        startupCanvasGroup.alpha = 0f;
+        startupCanvasGroup.interactable = false;
+        startupCanvasGroup.blocksRaycasts = false;
+        
+        // Optionally disable the panel after fading
+        if (startupPanel != null)
+            startupPanel.SetActive(false);
     }
 } 
