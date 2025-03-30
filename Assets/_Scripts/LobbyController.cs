@@ -226,8 +226,12 @@ public class LobbyController : NetworkBehaviour
     
     public void AddPlayer(ulong clientId, string playerName)
     {
+        // Update the name cache
         playerNames[clientId] = playerName;
-        UpdatePlayerList();
+        
+        // Create or update UI entry
+        Debug.Log($"AddPlayer called for client {clientId} with name: {playerName}");
+        CreateOrUpdatePlayerEntry(clientId, playerName);
     }
     
     public void RemovePlayer(ulong clientId)
@@ -282,60 +286,19 @@ public class LobbyController : NetworkBehaviour
         if (playerListContent == null || playerEntryPrefab == null)
             return;
             
-        // Clear existing entries that aren't in our list
-        foreach (var entry in playerEntries)
-        {
-            if (!playerNames.ContainsKey(entry.Key))
-            {
-                Destroy(entry.Value);
-                playerEntries.Remove(entry.Key);
-            }
-        }
+        Debug.Log($"UpdatePlayerList: Current player names: {string.Join(", ", playerNames.Values)}");
+            
+        // This was causing client not to see their own entry - we should keep all entries in playerNames
+        // New version doesn't delete entries but only creates missing ones
         
-        // Update or create entries for all players
+        // Add entries for any players that don't have one yet
         foreach (var player in playerNames)
         {
             ulong clientId = player.Key;
             string playerName = player.Value;
             
-            if (!playerEntries.ContainsKey(clientId) || playerEntries[clientId] == null)
-            {
-                // Create new entry
-                GameObject entryObj = Instantiate(playerEntryPrefab, playerListContent);
-                PlayerLobbyEntry entryComponent = entryObj.GetComponent<PlayerLobbyEntry>();
-                
-                if (entryComponent != null)
-                {
-                    entryComponent.SetPlayerInfo(playerName, clientId, 
-                        clientId == NetworkManager.Singleton.LocalClientId,
-                        clientId == 0); // Host is typically client ID 0
-                        
-                    // Set character selection if already selected
-                    if (playerCharacterSelections.ContainsKey(clientId))
-                    {
-                        entryComponent.SetCharacterSelection(playerCharacterSelections[clientId]);
-                    }
-                }
-                
-                playerEntries[clientId] = entryObj;
-            }
-            else
-            {
-                // Update existing entry
-                PlayerLobbyEntry entryComponent = playerEntries[clientId].GetComponent<PlayerLobbyEntry>();
-                if (entryComponent != null)
-                {
-                    entryComponent.SetPlayerInfo(playerName, clientId, 
-                        clientId == NetworkManager.Singleton.LocalClientId,
-                        clientId == 0);
-                        
-                    // Update character selection if already selected
-                    if (playerCharacterSelections.ContainsKey(clientId))
-                    {
-                        entryComponent.SetCharacterSelection(playerCharacterSelections[clientId]);
-                    }
-                }
-            }
+            // Create or update entry
+            CreateOrUpdatePlayerEntry(clientId, playerName);
         }
     }
     
@@ -346,21 +309,23 @@ public class LobbyController : NetworkBehaviour
             
         localSelectedCharacter = characterIndex;
         
-        // Update network variable based on whether we're host or client
+        // Instead of directly modifying NetworkVariables, always use RPC for clients
         if (NetworkManager.Singleton.IsHost || NetworkManager.Singleton.IsServer)
         {
+            // Host/server can directly set the value
             hostSelectedCharacter.Value = characterIndex;
+            
+            // Also update local caches
+            ulong localClientId = NetworkManager.Singleton.LocalClientId;
+            playerCharacterSelections[localClientId] = characterIndex;
         }
         else
         {
-            clientSelectedCharacter.Value = characterIndex;
+            // Clients should use ServerRpc instead
+            SelectCharacterServerRpc(characterIndex);
         }
         
-        // Also update local caches
-        ulong localClientId = NetworkManager.Singleton.LocalClientId;
-        playerCharacterSelections[localClientId] = characterIndex;
-        
-        // Update UI
+        // Update UI locally for immediate feedback
         UpdateCharacterSelectionUI();
         
         // Update network manager character selection if it exists
@@ -479,12 +444,10 @@ public class LobbyController : NetworkBehaviour
     [ClientRpc]
     public void UpdatePlayerNameClientRpc(ulong clientId, string playerName)
     {
-        // Don't update if this is our own client ID
-        if (clientId == NetworkManager.Singleton.LocalClientId)
-            return;
-            
         // Update the player name in our dictionary
         playerNames[clientId] = playerName;
+        
+        Debug.Log($"Received player name update for client {clientId}: {playerName}");
         
         // Update the UI
         UpdatePlayerList();
@@ -528,11 +491,17 @@ public class LobbyController : NetworkBehaviour
         // Add ourselves to the player list with the name from PlayerPrefs
         string playerName = PlayerPrefs.GetString("PlayerName", "Player " + NetworkManager.Singleton.LocalClientId);
         Debug.Log($"Adding player to lobby with name: {playerName}");
+        
+        // Add ourselves to local cache first for immediate display
         AddPlayer(NetworkManager.Singleton.LocalClientId, playerName);
         
-        // Server should announce to all clients that a new player joined (inform other clients about the new player)
+        // Inform others about ourselves based on connection type
         if (NetworkManager.Singleton.IsServer)
         {
+            // If we're the server, we need to broadcast our own name to all clients (including self)
+            UpdatePlayerNameClientRpc(NetworkManager.Singleton.LocalClientId, playerName);
+            
+            // Also, if we're the server, inform all existing clients about each other
             foreach (ulong clientId in NetworkManager.Singleton.ConnectedClientsIds)
             {
                 if (clientId != NetworkManager.Singleton.LocalClientId)
@@ -542,10 +511,16 @@ public class LobbyController : NetworkBehaviour
                         ? playerNames[clientId] 
                         : $"Player {clientId}";
                         
-                    // Inform the new player about existing players
+                    // Inform all clients about this player
                     UpdatePlayerNameClientRpc(clientId, otherPlayerName);
                 }
             }
+        }
+        else
+        {
+            // If we're a client, immediately tell the server our name
+            Debug.Log($"Client sending name to server: {playerName}");
+            NotifyServerOfNameServerRpc(playerName);
         }
     }
     
@@ -576,8 +551,11 @@ public class LobbyController : NetworkBehaviour
         {
             Debug.Log($"New client connected: {clientId}. Sending player info...");
             
+            // Create a copy of the dictionary to avoid enumeration issues
+            Dictionary<ulong, string> playerNamesCopy = new Dictionary<ulong, string>(playerNames);
+            
             // When a new client connects, send them all existing player names
-            foreach (var playerEntry in playerNames)
+            foreach (var playerEntry in playerNamesCopy)
             {
                 UpdatePlayerNameClientRpc(playerEntry.Key, playerEntry.Value);
             }
@@ -588,5 +566,69 @@ public class LobbyController : NetworkBehaviour
     {
         // Remove the disconnected player
         RemovePlayer(clientId);
+    }
+    
+    // New ServerRpc for client to inform server of its name
+    [ServerRpc(RequireOwnership = false)]
+    public void NotifyServerOfNameServerRpc(string playerName, ServerRpcParams serverRpcParams = default)
+    {
+        var clientId = serverRpcParams.Receive.SenderClientId;
+        Debug.Log($"Server received name from client {clientId}: {playerName}");
+        
+        // Update server's record of this client's name
+        playerNames[clientId] = playerName;
+        
+        // Broadcast to all clients including the sender
+        UpdatePlayerNameClientRpc(clientId, playerName);
+    }
+    
+    // New helper method to create or update player entries directly
+    private void CreateOrUpdatePlayerEntry(ulong clientId, string playerName)
+    {
+        if (playerListContent == null || playerEntryPrefab == null)
+            return;
+        
+        // Check if we already have an entry for this player
+        if (!playerEntries.ContainsKey(clientId) || playerEntries[clientId] == null)
+        {
+            // Create new entry
+            GameObject entryObj = Instantiate(playerEntryPrefab, playerListContent);
+            PlayerLobbyEntry entryComponent = entryObj.GetComponent<PlayerLobbyEntry>();
+            
+            if (entryComponent != null)
+            {
+                // Set player info immediately
+                entryComponent.SetPlayerInfo(playerName, clientId, 
+                    clientId == NetworkManager.Singleton.LocalClientId,
+                    clientId == 0); // Host is typically client ID 0
+                    
+                // Set character selection if already selected
+                if (playerCharacterSelections.ContainsKey(clientId))
+                {
+                    entryComponent.SetCharacterSelection(playerCharacterSelections[clientId]);
+                }
+            }
+            
+            playerEntries[clientId] = entryObj;
+            Debug.Log($"Created new player entry for client {clientId} with name: {playerName}");
+        }
+        else
+        {
+            // Update existing entry
+            PlayerLobbyEntry entryComponent = playerEntries[clientId].GetComponent<PlayerLobbyEntry>();
+            if (entryComponent != null)
+            {
+                entryComponent.SetPlayerInfo(playerName, clientId, 
+                    clientId == NetworkManager.Singleton.LocalClientId,
+                    clientId == 0);
+                    
+                // Update character selection if already selected
+                if (playerCharacterSelections.ContainsKey(clientId))
+                {
+                    entryComponent.SetCharacterSelection(playerCharacterSelections[clientId]);
+                }
+            }
+            Debug.Log($"Updated existing player entry for client {clientId} with name: {playerName}");
+        }
     }
 } 

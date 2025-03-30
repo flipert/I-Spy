@@ -11,16 +11,11 @@ public class GameHUDController : MonoBehaviour
     [SerializeField] private GameObject targetPanel;
     [SerializeField] private Image targetPortrait;
     [SerializeField] private TextMeshProUGUI targetLabel;
-    [SerializeField] private float targetDisplayDuration = 3f;
-    [SerializeField] private AnimationCurve targetDisplayCurve = AnimationCurve.EaseInOut(0f, 0f, 1f, 1f);
     
     [Header("Hunter Indicators")]
     [SerializeField] private GameObject[] hunterIndicators; // Array of up to 4 indicators
     
-    [Header("Player Info")]
-    [SerializeField] private Sprite defaultAvatar; // Fallback avatar if PlayerRegistry not available
-    
-    private Coroutine targetDisplayCoroutine;
+    private ulong currentTargetId;
     
     private void Start()
     {
@@ -74,6 +69,7 @@ public class GameHUDController : MonoBehaviour
         {
             // Show the target portrait
             ShowTargetPortrait(targetPlayerID);
+            currentTargetId = targetPlayerID;
         }
         
         // Update hunter indicators
@@ -86,84 +82,59 @@ public class GameHUDController : MonoBehaviour
         
         // Get target player avatar from registry
         Sprite targetAvatar = null;
+        string playerName = $"Player {targetPlayerID}";
         
         if (PlayerRegistry.Instance != null)
         {
             targetAvatar = PlayerRegistry.Instance.GetPlayerAvatar(targetPlayerID);
             
-            // Also get player name if we want to show it
+            // Also get player name 
             PlayerRegistry.PlayerData playerData = PlayerRegistry.Instance.GetPlayerData(targetPlayerID);
-            string playerName = playerData != null ? playerData.playerName : $"Player {targetPlayerID}";
+            if (playerData != null)
+            {
+                playerName = playerData.playerName;
+            }
             
-            // Could show player name in addition to "TARGET" label
             Debug.Log($"Target is {playerName}");
         }
         
-        // If no avatar from registry, use default
-        if (targetAvatar == null)
+        // Set the avatar sprite if available
+        if (targetAvatar != null)
         {
-            targetAvatar = defaultAvatar;
+            targetPortrait.sprite = targetAvatar;
         }
-        
-        // Set the avatar sprite
-        targetPortrait.sprite = targetAvatar;
         
         // Set target label text
         if (targetLabel != null)
         {
-            targetLabel.text = "TARGET";
+            targetLabel.text = "TARGET: " + playerName;
         }
         
-        // Stop any existing display coroutine
-        if (targetDisplayCoroutine != null)
-        {
-            StopCoroutine(targetDisplayCoroutine);
-        }
-        
-        // Start the display coroutine
-        targetDisplayCoroutine = StartCoroutine(ShowTargetPortraitCoroutine());
-    }
-    
-    private IEnumerator ShowTargetPortraitCoroutine()
-    {
-        // Show the panel
+        // Show the panel immediately
         targetPanel.SetActive(true);
         
-        // Animate in
-        float startTime = Time.time;
+        // Make sure it's fully visible
         CanvasGroup canvasGroup = targetPanel.GetComponent<CanvasGroup>();
         if (canvasGroup == null)
         {
             canvasGroup = targetPanel.AddComponent<CanvasGroup>();
         }
-        
-        // Fade in
-        canvasGroup.alpha = 0f;
-        while (Time.time < startTime + 0.5f)
-        {
-            float t = (Time.time - startTime) / 0.5f;
-            canvasGroup.alpha = targetDisplayCurve.Evaluate(t);
-            yield return null;
-        }
         canvasGroup.alpha = 1f;
-        
-        // Wait for display duration
-        yield return new WaitForSeconds(targetDisplayDuration);
-        
-        // Fade out
-        startTime = Time.time;
-        while (Time.time < startTime + 0.5f)
+    }
+    
+    public void HideTargetPortrait()
+    {
+        if (targetPanel != null)
         {
-            float t = (Time.time - startTime) / 0.5f;
-            canvasGroup.alpha = 1f - targetDisplayCurve.Evaluate(t);
-            yield return null;
+            targetPanel.SetActive(false);
         }
-        canvasGroup.alpha = 0f;
-        
-        // Hide the panel
-        targetPanel.SetActive(false);
-        
-        targetDisplayCoroutine = null;
+    }
+    
+    // Call this when the player kills their target
+    public void OnTargetKilled()
+    {
+        HideTargetPortrait();
+        currentTargetId = 0;
     }
     
     private void UpdateHunterIndicators(ulong playerId)
@@ -196,5 +167,11 @@ public class GameHUDController : MonoBehaviour
         
         ulong localPlayerID = NetworkManager.Singleton.LocalClientId;
         UpdateHunterIndicators(localPlayerID);
+    }
+    
+    // Public method to get current target ID
+    public ulong GetCurrentTargetId()
+    {
+        return currentTargetId;
     }
 } 

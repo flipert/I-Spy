@@ -253,7 +253,22 @@ public class MainMenuController : MonoBehaviour
         {
             float volume = volumeSlider.value;
             PlayerPrefs.SetFloat("MasterVolume", volume);
-            AudioListener.volume = volume;
+            
+            // Use AudioManager if available instead of modifying AudioListener directly
+            if (AudioManager.Instance != null)
+            {
+                AudioManager.Instance.SetMusicVolume(volume);
+                AudioManager.Instance.SetSFXVolume(volume);
+            }
+            else
+            {
+                // Fallback to AudioListener only if no AudioManager is available
+                AudioListener[] listeners = FindObjectsOfType<AudioListener>();
+                if (listeners.Length > 0 && listeners[0] != null && listeners[0].enabled)
+                {
+                    AudioListener.volume = volume;
+                }
+            }
         }
         
         // Apply fullscreen setting

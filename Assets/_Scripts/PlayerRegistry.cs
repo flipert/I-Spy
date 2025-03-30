@@ -2,6 +2,36 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using Unity.Netcode;
+using System;
+
+// Custom serializable class to replace ulong[] in NetworkVariable
+[Serializable]
+public struct PlayerAvatarData : IEquatable<PlayerAvatarData>
+{
+    public ulong[] data;
+
+    public PlayerAvatarData(ulong[] data)
+    {
+        this.data = data;
+    }
+
+    public bool Equals(PlayerAvatarData other)
+    {
+        if (data == null && other.data == null)
+            return true;
+        if (data == null || other.data == null)
+            return false;
+        if (data.Length != other.data.Length)
+            return false;
+
+        for (int i = 0; i < data.Length; i++)
+        {
+            if (data[i] != other.data[i])
+                return false;
+        }
+        return true;
+    }
+}
 
 public class PlayerRegistry : NetworkBehaviour
 {
@@ -21,8 +51,10 @@ public class PlayerRegistry : NetworkBehaviour
     
     // Network Variables to sync player data 
     // Format: [clientId1, avatarIndex1, clientId2, avatarIndex2, ...]
-    private NetworkVariable<ulong[]> playerAvatarAssignments = new NetworkVariable<ulong[]>(
-        new ulong[0], NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
+    private NetworkVariable<PlayerAvatarData> playerAvatarAssignments = new NetworkVariable<PlayerAvatarData>(
+        new PlayerAvatarData(new ulong[0]), 
+        NetworkVariableReadPermission.Everyone, 
+        NetworkVariableWritePermission.Server);
     
     // Singleton pattern
     public static PlayerRegistry Instance { get; private set; }
@@ -139,22 +171,22 @@ public class PlayerRegistry : NetworkBehaviour
         }
         
         // Update the network variable
-        playerAvatarAssignments.Value = assignmentData.ToArray();
+        playerAvatarAssignments.Value = new PlayerAvatarData(assignmentData.ToArray());
     }
     
     // Callback when player avatar assignments change
-    private void OnPlayerAvatarAssignmentsChanged(ulong[] previousValue, ulong[] newValue)
+    private void OnPlayerAvatarAssignmentsChanged(PlayerAvatarData previousValue, PlayerAvatarData newValue)
     {
         // Clear the dictionary
         playerDataDict.Clear();
         
         // Rebuild the dictionary from the network variable
-        for (int i = 0; i < newValue.Length; i += 2)
+        for (int i = 0; i < newValue.data.Length; i += 2)
         {
-            if (i + 1 >= newValue.Length) break;
+            if (i + 1 >= newValue.data.Length) break;
             
-            ulong clientId = newValue[i];
-            int avatarIndex = (int)newValue[i + 1];
+            ulong clientId = newValue.data[i];
+            int avatarIndex = (int)newValue.data[i + 1];
             
             PlayerData playerData = new PlayerData
             {

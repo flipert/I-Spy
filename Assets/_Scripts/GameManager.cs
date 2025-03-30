@@ -3,6 +3,36 @@ using System.Collections.Generic;
 using UnityEngine;
 using Unity.Netcode;
 using System.Linq;
+using System;
+
+// Custom serializable class to replace ulong[] in NetworkVariable
+[Serializable]
+public struct TargetAssignmentData : IEquatable<TargetAssignmentData>
+{
+    public ulong[] assignments;
+
+    public TargetAssignmentData(ulong[] assignments)
+    {
+        this.assignments = assignments;
+    }
+
+    public bool Equals(TargetAssignmentData other)
+    {
+        if (assignments == null && other.assignments == null)
+            return true;
+        if (assignments == null || other.assignments == null)
+            return false;
+        if (assignments.Length != other.assignments.Length)
+            return false;
+
+        for (int i = 0; i < assignments.Length; i++)
+        {
+            if (assignments[i] != other.assignments[i])
+                return false;
+        }
+        return true;
+    }
+}
 
 public class GameManager : NetworkBehaviour
 {
@@ -19,7 +49,8 @@ public class GameManager : NetworkBehaviour
     
     // Network variable to track target assignments (clientID -> targetID)
     // We'll use this structure: [hunterID1, targetID1, hunterID2, targetID2, etc.]
-    private NetworkVariable<ulong[]> targetAssignments = new NetworkVariable<ulong[]>(new ulong[0],
+    private NetworkVariable<TargetAssignmentData> targetAssignments = new NetworkVariable<TargetAssignmentData>(
+        new TargetAssignmentData(new ulong[0]),
         NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
     
     // Singleton pattern for easy access
@@ -28,7 +59,7 @@ public class GameManager : NetworkBehaviour
     // Methods for other scripts to get targeting information
     public ulong GetTargetForPlayer(ulong playerId) 
     {
-        var assignments = targetAssignments.Value;
+        var assignments = targetAssignments.Value.assignments;
         for (int i = 0; i < assignments.Length; i += 2) 
         {
             if (assignments[i] == playerId && i + 1 < assignments.Length) 
@@ -113,10 +144,10 @@ public class GameManager : NetworkBehaviour
     }
     
     // Event handlers for network variables
-    private void OnTargetAssignmentsChanged(ulong[] previousValue, ulong[] newValue)
+    private void OnTargetAssignmentsChanged(TargetAssignmentData previousValue, TargetAssignmentData newValue)
     {
         // When target assignments change, update the local player targets dictionary
-        UpdatePlayerTargetsFromAssignments(newValue);
+        UpdatePlayerTargetsFromAssignments(newValue.assignments);
         
         // Notify any listeners (like UI) that targets have been assigned
         OnTargetsAssigned();
@@ -145,7 +176,7 @@ public class GameManager : NetworkBehaviour
         }
         
         // Shuffle the player list for random assignment
-        players = players.OrderBy(x => Random.value).ToList();
+        players = players.OrderBy(x => UnityEngine.Random.value).ToList();
         
         // Create circular targeting: player 0 targets player 1, player 1 targets player 2, ..., 
         // and the last player targets player 0
@@ -163,7 +194,7 @@ public class GameManager : NetworkBehaviour
         }
         
         // Set the network variable to broadcast to all clients
-        targetAssignments.Value = assignments;
+        targetAssignments.Value = new TargetAssignmentData(assignments);
     }
     
     // Update the local player targets dictionary from assignments array

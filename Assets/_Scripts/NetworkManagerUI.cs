@@ -8,6 +8,7 @@ using System.Net.Sockets;
 using System.Collections;
 using UnityEngine.SceneManagement;
 using System.Collections.Generic;
+using Unity.Netcode.Transports.UTP;
 
 public class NetworkManagerUI : MonoBehaviour
 {
@@ -30,6 +31,9 @@ public class NetworkManagerUI : MonoBehaviour
     [SerializeField] private GameObject[] characterPrefabs;
     [SerializeField] private Button[] characterSelectionButtons;
     [SerializeField] private int defaultCharacterIndex = 0;
+
+    [Header("NPC Prefabs")]
+    [SerializeField] private GameObject npcPrefab;
     
     // Singleton pattern
     public static NetworkManagerUI Instance { get; private set; }
@@ -48,6 +52,9 @@ public class NetworkManagerUI : MonoBehaviour
     
     // Add a flag to track if we should show the lobby
     private bool shouldShowLobby = false;
+
+    // Dictionary to keep track of registered prefabs
+    private Dictionary<uint, GameObject> registeredPrefabs = new Dictionary<uint, GameObject>();
     
     private void Awake()
     {
@@ -63,40 +70,24 @@ public class NetworkManagerUI : MonoBehaviour
             return;
         }
         
-        // Set the default character
-        selectedCharacterIndex = defaultCharacterIndex;
-        if (characterPrefabs != null && characterPrefabs.Length > 0 && 
-            selectedCharacterIndex >= 0 && selectedCharacterIndex < characterPrefabs.Length)
-        {
-            SelectedCharacterPrefab = characterPrefabs[selectedCharacterIndex];
-        }
-        
         // Setup character selection buttons
         SetupCharacterSelectionButtons();
         
-        // Check if NetworkManager exists, if not create one
+        // Select default character
+        selectedCharacterIndex = Mathf.Clamp(defaultCharacterIndex, 0, characterPrefabs.Length - 1);
+        
+        // Make sure there is a NetworkManager
         if (NetworkManager.Singleton == null)
         {
-            Debug.Log("Creating a NetworkManager as none was found in the scene.");
+            Debug.LogWarning("NetworkManager not found, creating one");
             GameObject networkManagerObj = new GameObject("NetworkManager");
             NetworkManager networkManager = networkManagerObj.AddComponent<NetworkManager>();
             
-            // Add and configure transport
-            var transport = networkManagerObj.AddComponent<Unity.Netcode.Transports.UTP.UnityTransport>();
+            // Add Unity Transport
+            networkManagerObj.AddComponent<UnityTransport>();
             
-            // Set the transport on the NetworkManager
-            networkManager.NetworkConfig = new Unity.Netcode.NetworkConfig
-            {
-                PlayerPrefab = null,
-                ConnectionApproval = true,
-            };
-            
-            // Must explicitly set the transport
-            networkManager.NetworkConfig.NetworkTransport = transport;
-            
-            // Configure transport
-            transport.ConnectionData.Address = defaultIP;
-            transport.ConnectionData.Port = defaultPort;
+            // Ensure NetworkConfig is created
+            networkManager.NetworkConfig = new NetworkConfig();
             
             DontDestroyOnLoad(networkManagerObj);
         }
@@ -107,18 +98,18 @@ public class NetworkManagerUI : MonoBehaviour
             DontDestroyOnLoad(NetworkManager.Singleton.gameObject);
             
             // Make sure NetworkConfig is not null before accessing it
-            if (NetworkManager.Singleton.NetworkConfig != null)
+            if (NetworkManager.Singleton.NetworkConfig == null)
             {
-                // Configure NetworkManager to prevent auto-spawning players
-                NetworkManager.Singleton.NetworkConfig.PlayerPrefab = null;
-                
-                // Enable connection approval to control when players can join
-                NetworkManager.Singleton.NetworkConfig.ConnectionApproval = true;
+                Debug.LogWarning("NetworkConfig is null, creating a new one");
+                NetworkManager.Singleton.NetworkConfig = new NetworkConfig();
             }
-            else
-            {
-                Debug.LogError("NetworkManager.Singleton.NetworkConfig is null. The NetworkManager may not be properly initialized.");
-            }
+            
+            // Now we can safely configure the NetworkConfig
+            NetworkManager.Singleton.NetworkConfig.PlayerPrefab = null;
+            NetworkManager.Singleton.NetworkConfig.ConnectionApproval = true;
+            
+            // Register all necessary prefabs with NetworkManager
+            RegisterAllNetworkPrefabs();
             
             // These can be outside the NetworkConfig check
             NetworkManager.Singleton.ConnectionApprovalCallback -= ApproveConnection; // Remove any previous callbacks
@@ -157,6 +148,66 @@ public class NetworkManagerUI : MonoBehaviour
         {
             Debug.LogError("NetworkManager.Singleton is still null after attempt to create it.");
         }
+    }
+
+    // New method to register all network prefabs
+    private void RegisterAllNetworkPrefabs()
+    {
+        // Clear our tracking dictionary
+        registeredPrefabs.Clear();
+
+        // Create a new NetworkPrefabs list to ensure compatibility
+        NetworkManager.Singleton.NetworkConfig.Prefabs = new NetworkPrefabs();
+
+        // Register all character prefabs
+        foreach (GameObject prefab in characterPrefabs)
+        {
+            if (prefab != null)
+            {
+                RegisterNetworkPrefab(prefab);
+            }
+        }
+
+        // Register NPC prefab if available
+        if (npcPrefab != null)
+        {
+            RegisterNetworkPrefab(npcPrefab);
+        }
+
+        // Add any other required prefabs here
+        Debug.Log($"Registered {registeredPrefabs.Count} network prefabs");
+    }
+
+    // Helper method to register a single prefab
+    private void RegisterNetworkPrefab(GameObject prefab)
+    {
+        if (prefab == null)
+            return;
+
+        NetworkObject networkObject = prefab.GetComponent<NetworkObject>();
+        if (networkObject == null)
+        {
+            Debug.LogError($"Prefab {prefab.name} is missing NetworkObject component!");
+            return;
+        }
+
+        // Calculate a hash from the prefab name for tracking
+        uint prefabHash = (uint)prefab.name.GetHashCode();
+        
+        // Skip if already registered
+        if (registeredPrefabs.ContainsKey(prefabHash))
+        {
+            Debug.LogWarning($"Prefab {prefab.name} is already registered");
+            return;
+        }
+
+        // Add to our tracking dictionary
+        registeredPrefabs[prefabHash] = prefab;
+        
+        // Add to NetworkConfig
+        NetworkManager.Singleton.NetworkConfig.Prefabs.Add(new NetworkPrefab { Prefab = prefab });
+        
+        Debug.Log($"Registered network prefab: {prefab.name}");
     }
     
     private void SetupCharacterSelectionButtons()
@@ -197,6 +248,12 @@ public class NetworkManagerUI : MonoBehaviour
             SelectedCharacterPrefab = characterPrefabs[characterIndex];
             Debug.Log($"Selected character: {SelectedCharacterPrefab.name}");
             
+            // Make sure this prefab is registered with NetworkManager
+            if (NetworkManager.Singleton?.NetworkConfig?.Prefabs != null)
+            {
+                RegisterNetworkPrefab(SelectedCharacterPrefab);
+            }
+            
             // Highlight the selected button (optional)
             UpdateCharacterSelectionUI();
         }
@@ -227,8 +284,13 @@ public class NetworkManagerUI : MonoBehaviour
             DontDestroyOnLoad(gameObject);
         }
         
-        // Initialize character selection
-        SelectCharacter(selectedCharacterIndex);
+        // Initialize character selection - make sure SelectedCharacterPrefab is set
+        if (SelectedCharacterPrefab == null && characterPrefabs != null && characterPrefabs.Length > 0)
+        {
+            selectedCharacterIndex = Mathf.Clamp(defaultCharacterIndex, 0, characterPrefabs.Length - 1);
+            SelectedCharacterPrefab = characterPrefabs[selectedCharacterIndex];
+            Debug.Log($"Start: Initialized selected character to {SelectedCharacterPrefab.name}");
+        }
     }
     
     private void OnDestroy()
@@ -460,6 +522,9 @@ public class NetworkManagerUI : MonoBehaviour
                 NetworkManager.Singleton.NetworkConfig.PlayerPrefab = null;
                 NetworkManager.Singleton.NetworkConfig.ConnectionApproval = true;
                 NetworkManager.Singleton.NetworkConfig.NetworkTransport = transport;
+                
+                // Make sure all necessary prefabs are registered
+                RegisterAllNetworkPrefabs();
             }
             else
             {
@@ -470,6 +535,9 @@ public class NetworkManagerUI : MonoBehaviour
                     ConnectionApproval = true,
                     NetworkTransport = transport
                 };
+                
+                // Register prefabs on the new NetworkConfig
+                RegisterAllNetworkPrefabs();
             }
             
             // Make sure our callback is registered
@@ -480,6 +548,9 @@ public class NetworkManagerUI : MonoBehaviour
             {
                 NetworkManager.Singleton.StartHost();
                 Debug.Log("Host started successfully");
+                
+                // Log all registered prefabs for debugging
+                LogRegisteredPrefabs();
                 
                 // Fade out the UI
                 StartCoroutine(FadeOutUI());
@@ -532,6 +603,9 @@ public class NetworkManagerUI : MonoBehaviour
             NetworkManager.Singleton.NetworkConfig.PlayerPrefab = null;
             NetworkManager.Singleton.NetworkConfig.ConnectionApproval = true;
             NetworkManager.Singleton.NetworkConfig.NetworkTransport = transport;
+            
+            // Make sure all necessary prefabs are registered
+            RegisterAllNetworkPrefabs();
         }
         else
         {
@@ -542,6 +616,9 @@ public class NetworkManagerUI : MonoBehaviour
                 ConnectionApproval = true,
                 NetworkTransport = transport
             };
+            
+            // Register prefabs on the new NetworkConfig
+            RegisterAllNetworkPrefabs();
         }
         
         // Make sure our callback is registered
@@ -555,12 +632,33 @@ public class NetworkManagerUI : MonoBehaviour
             NetworkManager.Singleton.StartClient();
             UpdateStatusText("Connecting to " + ipAddress + "...");
             
+            // Log all registered prefabs for debugging
+            LogRegisteredPrefabs();
+            
             // Fade out the UI
             StartCoroutine(FadeOutUI());
         }
         catch (System.Exception ex)
         {
             Debug.LogError($"Failed to start client: {ex.Message}\n{ex.StackTrace}");
+        }
+    }
+    
+    // Helper method to log all registered prefabs for debugging
+    private void LogRegisteredPrefabs()
+    {
+        if (NetworkManager.Singleton?.NetworkConfig?.Prefabs != null)
+        {
+            int prefabCount = registeredPrefabs.Count;
+            Debug.Log($"Total registered network prefabs: {prefabCount}");
+            foreach (var prefab in registeredPrefabs)
+            {
+                Debug.Log($"Registered prefab: {prefab.Value.name}");
+            }
+        }
+        else
+        {
+            Debug.LogError("Cannot list registered prefabs - NetworkConfig or Prefabs list is null");
         }
     }
     
