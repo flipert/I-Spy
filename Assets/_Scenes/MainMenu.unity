@@ -1330,7 +1330,7 @@ MonoBehaviour:
   startupPanel: {fileID: 1240801667}
   startupCanvasGroup: {fileID: 1240801669}
   fadeOutDuration: 0.5
-  defaultIP: 72.14.201.65
+  defaultIP: 90.193.31.122
   defaultPort: 7777
   gameSceneName: Game
   sceneLoadDelay: 1
@@ -1366,7 +1366,7 @@ MonoBehaviour:
   m_MaxConnectAttempts: 60
   m_DisconnectTimeoutMS: 30000
   ConnectionData:
-    Address: 72.14.201.65
+    Address: 90.193.31.122
     Port: 7777
     ServerListenAddress: 0.0.0.0
   DebugSimulator:
@@ -9413,7 +9413,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: 72.14.201.65
+  m_text: 90.193.31.122
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 5e6d6c8f599b44711a6703bacaa59051, type: 2}
   m_sharedMaterial: {fileID: 3363561868622050818, guid: 5e6d6c8f599b44711a6703bacaa59051, type: 2}
