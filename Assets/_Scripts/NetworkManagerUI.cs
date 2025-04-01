@@ -514,65 +514,6 @@ public class NetworkManagerUI : MonoBehaviour
         response.Approved = true;
     }
     
-    public void OnHostButtonClicked()
-    {
-        if (NetworkManager.Singleton != null)
-        {
-            shouldShowLobby = true;
-            
-            var transport = NetworkManager.Singleton.GetComponent<UnityTransport>();
-            if (transport == null)
-            {
-                Debug.LogError("Unity Transport component missing! Adding one...");
-                transport = NetworkManager.Singleton.gameObject.AddComponent<UnityTransport>();
-            }
-            
-            // When hosting, bind to all available network interfaces
-            transport.ConnectionData.Address = "0.0.0.0";
-            transport.ConnectionData.Port = defaultPort;
-            
-            Debug.Log($"Host binding to all interfaces (0.0.0.0) on port {defaultPort}");
-            
-            // Show the IP address that others should use to connect
-            string publicIP = GetLocalIPAddress();
-            UpdateStatusText($"Starting host... Others can connect to: {publicIP}");
-            
-            // Ensure NetworkConfig is properly set up
-            if (NetworkManager.Singleton.NetworkConfig == null)
-            {
-                NetworkManager.Singleton.NetworkConfig = new NetworkConfig();
-            }
-            
-            NetworkManager.Singleton.NetworkConfig.PlayerPrefab = null;
-            NetworkManager.Singleton.NetworkConfig.ConnectionApproval = true;
-            NetworkManager.Singleton.NetworkConfig.NetworkTransport = transport;
-            
-            // Register all prefabs before starting the host
-            RegisterAllNetworkPrefabs();
-            
-            NetworkManager.Singleton.ConnectionApprovalCallback -= ApproveConnection;
-            NetworkManager.Singleton.ConnectionApprovalCallback += ApproveConnection;
-            
-            try
-            {
-                NetworkManager.Singleton.StartHost();
-                Debug.Log("Host started successfully");
-                LogRegisteredPrefabs();
-                StartCoroutine(FadeOutUI());
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"Failed to start host: {ex.Message}\n{ex.StackTrace}");
-                UpdateStatusText($"Failed to start host: {ex.Message}");
-            }
-        }
-        else
-        {
-            Debug.LogError("NetworkManager.Singleton is null when trying to start host!");
-            UpdateStatusText("Error: NetworkManager not found!");
-        }
-    }
-    
     public void OnClientButtonClicked()
     {
         if (NetworkManager.Singleton == null)
@@ -607,6 +548,10 @@ public class NetworkManagerUI : MonoBehaviour
         transport.ConnectionData.Address = ipAddress;
         transport.ConnectionData.Port = defaultPort;
         
+        // Make connection more reliable
+        transport.MaxConnectAttempts = 3;
+        transport.ConnectTimeoutMS = 10000; // 10 seconds
+        
         Debug.Log($"Transport configured - Address: {transport.ConnectionData.Address}, Port: {transport.ConnectionData.Port}");
         
         // Ensure NetworkConfig is properly set up
@@ -622,62 +567,168 @@ public class NetworkManagerUI : MonoBehaviour
         // Register all prefabs before starting the client
         RegisterAllNetworkPrefabs();
         
-        // Add connection timeout handling
-        StartCoroutine(ConnectionTimeoutCheck());
+        // Store reference to the active coroutine so we can stop it if needed
+        StartCoroutine(ShowConnectingUI());
         
         try
         {
             Debug.Log("Starting client connection attempt...");
             NetworkManager.Singleton.StartClient();
-            
             LogRegisteredPrefabs();
-            StartCoroutine(FadeOutUI());
+            
+            // Start a new coroutine that checks connection status and handles timeout
+            StartCoroutine(ConnectionTimeoutCheck());
         }
         catch (Exception ex)
         {
             Debug.LogError($"Failed to start client: {ex.Message}\n{ex.StackTrace}");
             UpdateStatusText($"Connection failed: {ex.Message}");
-            StopCoroutine(ConnectionTimeoutCheck());
+            StopAllCoroutines();
+            RecoverUI("Exception during connection attempt. Please try again.");
+        }
+    }
+    
+    private IEnumerator ShowConnectingUI()
+    {
+        // Show connecting animation/text
+        UpdateStatusText("Connecting...");
+        
+        float blinkInterval = 0.5f;
+        int dotCount = 0;
+        
+        while (true)
+        {
+            dotCount = (dotCount + 1) % 4;
+            string dots = new string('.', dotCount);
+            UpdateStatusText($"Connecting{dots}");
+            yield return new WaitForSeconds(blinkInterval);
         }
     }
     
     private IEnumerator ConnectionTimeoutCheck()
     {
-        float timeoutDuration = 10f; // 10 seconds timeout
+        float timeoutDuration = 15f; // 15 seconds timeout
         float startTime = Time.time;
         
+        // Periodically check connection status
         while (Time.time - startTime < timeoutDuration)
         {
+            // If connected successfully, stop checking
             if (NetworkManager.Singleton.IsConnectedClient)
             {
-                yield break; // Successfully connected
+                Debug.Log("Successfully connected to host!");
+                StopCoroutine(ShowConnectingUI());
+                StartCoroutine(FadeOutUI());
+                yield break;
             }
+            
+            // If disconnected (connection failed after initial attempt), recover UI
+            if (NetworkManager.Singleton.IsListening && !NetworkManager.Singleton.IsConnectedClient)
+            {
+                Debug.LogWarning("Connection attempt failed - network is listening but not connected");
+                StopCoroutine(ShowConnectingUI());
+                RecoverUI("Connection attempt failed. Please check the IP address and try again.");
+                yield break;
+            }
+            
             yield return new WaitForSeconds(0.5f);
         }
         
         // If we get here, connection timed out
-        if (!NetworkManager.Singleton.IsConnectedClient)
+        Debug.LogWarning("Connection attempt timed out after " + timeoutDuration + " seconds");
+        StopCoroutine(ShowConnectingUI());
+        
+        // Try to clean up the failed connection
+        if (NetworkManager.Singleton.IsClient)
         {
-            Debug.LogWarning("Connection attempt timed out");
-            UpdateStatusText("Connection timed out. Please check the IP address and try again.");
-            
-            // Try to clean up the failed connection
-            if (NetworkManager.Singleton.IsClient)
+            NetworkManager.Singleton.Shutdown();
+        }
+        
+        RecoverUI("Connection timed out. Please check the IP address and ensure port 7777 is forwarded on the host.");
+    }
+    
+    // Helper method to recover UI after a failed connection attempt
+    private void RecoverUI(string errorMessage)
+    {
+        // Show the error message
+        UpdateStatusText(errorMessage);
+        
+        // Show the startup panel again
+        if (startupPanel != null)
+        {
+            startupPanel.SetActive(true);
+            if (startupCanvasGroup != null)
             {
-                NetworkManager.Singleton.Shutdown();
+                startupCanvasGroup.alpha = 1f;
+                startupCanvasGroup.interactable = true;
+                startupCanvasGroup.blocksRaycasts = true;
+            }
+        }
+    }
+    
+    public void OnHostButtonClicked()
+    {
+        if (NetworkManager.Singleton != null)
+        {
+            shouldShowLobby = true;
+            
+            var transport = NetworkManager.Singleton.GetComponent<UnityTransport>();
+            if (transport == null)
+            {
+                Debug.LogError("Unity Transport component missing! Adding one...");
+                transport = NetworkManager.Singleton.gameObject.AddComponent<UnityTransport>();
             }
             
-            // Show the startup panel again
-            if (startupPanel != null)
+            // When hosting, bind to all available network interfaces
+            transport.ConnectionData.Address = "0.0.0.0";
+            transport.ConnectionData.Port = defaultPort;
+            
+            // Make connection more reliable
+            transport.MaxConnectAttempts = 3;
+            transport.ConnectTimeoutMS = 10000; // 10 seconds
+            
+            Debug.Log($"Host binding to all interfaces (0.0.0.0) on port {defaultPort}");
+            
+            // Show the IP address that others should use to connect
+            string publicIP = GetLocalIPAddress();
+            UpdateStatusText($"Starting host... Others can connect to: {publicIP}");
+            
+            // Ensure NetworkConfig is properly set up
+            if (NetworkManager.Singleton.NetworkConfig == null)
             {
-                startupPanel.SetActive(true);
-                if (startupCanvasGroup != null)
-                {
-                    startupCanvasGroup.alpha = 1f;
-                    startupCanvasGroup.interactable = true;
-                    startupCanvasGroup.blocksRaycasts = true;
-                }
+                NetworkManager.Singleton.NetworkConfig = new NetworkConfig();
             }
+            
+            NetworkManager.Singleton.NetworkConfig.PlayerPrefab = null;
+            NetworkManager.Singleton.NetworkConfig.ConnectionApproval = true;
+            NetworkManager.Singleton.NetworkConfig.NetworkTransport = transport;
+            
+            // Register all prefabs before starting the host
+            RegisterAllNetworkPrefabs();
+            
+            NetworkManager.Singleton.ConnectionApprovalCallback -= ApproveConnection;
+            NetworkManager.Singleton.ConnectionApprovalCallback += ApproveConnection;
+            
+            try
+            {
+                NetworkManager.Singleton.StartHost();
+                Debug.Log("Host started successfully");
+                LogRegisteredPrefabs();
+                StartCoroutine(FadeOutUI());
+                
+                // Display a message about port forwarding
+                Debug.Log("IMPORTANT: Make sure port 7777 is forwarded in your router to allow external connections");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Failed to start host: {ex.Message}\n{ex.StackTrace}");
+                UpdateStatusText($"Failed to start host: {ex.Message}");
+            }
+        }
+        else
+        {
+            Debug.LogError("NetworkManager.Singleton is null when trying to start host!");
+            UpdateStatusText("Error: NetworkManager not found!");
         }
     }
     
