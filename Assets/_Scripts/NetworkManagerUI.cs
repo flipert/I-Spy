@@ -177,6 +177,12 @@ public class NetworkManagerUI : MonoBehaviour
 
         // Add any other required prefabs here
         Debug.Log($"Registered {registeredPrefabs.Count} network prefabs");
+        
+        // Log all registered prefabs for debugging
+        foreach (var prefab in registeredPrefabs)
+        {
+            Debug.Log($"Registered prefab: {prefab.Value.name} with hash {prefab.Key}");
+        }
     }
 
     // Helper method to register a single prefab
@@ -208,7 +214,7 @@ public class NetworkManagerUI : MonoBehaviour
         // Add to NetworkConfig
         NetworkManager.Singleton.NetworkConfig.Prefabs.Add(new NetworkPrefab { Prefab = prefab });
         
-        Debug.Log($"Registered network prefab: {prefab.name}");
+        Debug.Log($"Registered network prefab: {prefab.name} with hash {prefabHash}");
     }
     
     private void SetupCharacterSelectionButtons()
@@ -533,24 +539,18 @@ public class NetworkManagerUI : MonoBehaviour
             string publicIP = GetLocalIPAddress();
             UpdateStatusText($"Starting host... Others can connect to: {publicIP}");
             
-            if (NetworkManager.Singleton.NetworkConfig != null)
+            // Ensure NetworkConfig is properly set up
+            if (NetworkManager.Singleton.NetworkConfig == null)
             {
-                NetworkManager.Singleton.NetworkConfig.PlayerPrefab = null;
-                NetworkManager.Singleton.NetworkConfig.ConnectionApproval = true;
-                NetworkManager.Singleton.NetworkConfig.NetworkTransport = transport;
-                RegisterAllNetworkPrefabs();
+                NetworkManager.Singleton.NetworkConfig = new NetworkConfig();
             }
-            else
-            {
-                Debug.LogError("NetworkManager.Singleton.NetworkConfig is null. Creating a new one.");
-                NetworkManager.Singleton.NetworkConfig = new NetworkConfig
-                {
-                    PlayerPrefab = null,
-                    ConnectionApproval = true,
-                    NetworkTransport = transport
-                };
-                RegisterAllNetworkPrefabs();
-            }
+            
+            NetworkManager.Singleton.NetworkConfig.PlayerPrefab = null;
+            NetworkManager.Singleton.NetworkConfig.ConnectionApproval = true;
+            NetworkManager.Singleton.NetworkConfig.NetworkTransport = transport;
+            
+            // Register all prefabs before starting the host
+            RegisterAllNetworkPrefabs();
             
             NetworkManager.Singleton.ConnectionApprovalCallback -= ApproveConnection;
             NetworkManager.Singleton.ConnectionApprovalCallback += ApproveConnection;
@@ -611,27 +611,18 @@ public class NetworkManagerUI : MonoBehaviour
         
         Debug.Log($"Transport configured - Address: {transport.ConnectionData.Address}, Port: {transport.ConnectionData.Port}");
         
-        // Check if NetworkConfig is not null
-        if (NetworkManager.Singleton.NetworkConfig != null)
+        // Ensure NetworkConfig is properly set up
+        if (NetworkManager.Singleton.NetworkConfig == null)
         {
-            NetworkManager.Singleton.NetworkConfig.PlayerPrefab = null;
-            NetworkManager.Singleton.NetworkConfig.ConnectionApproval = true;
-            NetworkManager.Singleton.NetworkConfig.NetworkTransport = transport;
-            
-            RegisterAllNetworkPrefabs();
+            NetworkManager.Singleton.NetworkConfig = new NetworkConfig();
         }
-        else
-        {
-            Debug.LogError("NetworkManager.Singleton.NetworkConfig is null. Creating a new one.");
-            NetworkManager.Singleton.NetworkConfig = new NetworkConfig
-            {
-                PlayerPrefab = null,
-                ConnectionApproval = true,
-                NetworkTransport = transport
-            };
-            
-            RegisterAllNetworkPrefabs();
-        }
+        
+        NetworkManager.Singleton.NetworkConfig.PlayerPrefab = null;
+        NetworkManager.Singleton.NetworkConfig.ConnectionApproval = true;
+        NetworkManager.Singleton.NetworkConfig.NetworkTransport = transport;
+        
+        // Register all prefabs before starting the client
+        RegisterAllNetworkPrefabs();
         
         // Add connection timeout handling
         StartCoroutine(ConnectionTimeoutCheck());
