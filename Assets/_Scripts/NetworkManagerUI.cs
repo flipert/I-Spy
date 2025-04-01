@@ -115,6 +115,9 @@ public class NetworkManagerUI : MonoBehaviour
             // These can be outside the NetworkConfig check
             NetworkManager.Singleton.ConnectionApprovalCallback -= ApproveConnection; // Remove any previous callbacks
             NetworkManager.Singleton.ConnectionApprovalCallback += ApproveConnection;
+
+            // Subscribe to transport failure events
+            NetworkManager.Singleton.OnTransportFailure += OnTransportFailure;
         }
         else
         {
@@ -309,6 +312,7 @@ public class NetworkManagerUI : MonoBehaviour
             NetworkManager.Singleton.OnClientDisconnectCallback -= OnClientDisconnected;
             NetworkManager.Singleton.OnServerStarted -= OnServerStarted;
             NetworkManager.Singleton.ConnectionApprovalCallback -= ApproveConnection;
+            NetworkManager.Singleton.OnTransportFailure -= OnTransportFailure;
         }
     }
     
@@ -506,14 +510,8 @@ public class NetworkManagerUI : MonoBehaviour
     // Connection approval callback - this controls when players can join
     private void ApproveConnection(NetworkManager.ConnectionApprovalRequest request, NetworkManager.ConnectionApprovalResponse response)
     {
-        Debug.Log($"Connection approval requested for client ID: {request.ClientNetworkId}");
-        
-        // Always approve the connection
+        Debug.Log($"Connection request received from client {request.ClientNetworkId}");
         response.Approved = true;
-        response.CreatePlayerObject = false; // Don't create player object automatically
-        response.Position = Vector3.zero;
-        response.Rotation = Quaternion.identity;
-        response.Pending = false;
     }
     
     public void OnHostButtonClicked()
@@ -723,5 +721,11 @@ public class NetworkManagerUI : MonoBehaviour
         // Optionally disable the panel after fading
         if (startupPanel != null)
             startupPanel.SetActive(false);
+    }
+
+    private void OnTransportFailure()
+    {
+        Debug.LogError("Transport failure occurred. Check your network settings and port forwarding.");
+        UpdateStatusText("Connection failed: Transport error. Check your network settings.");
     }
 } 
