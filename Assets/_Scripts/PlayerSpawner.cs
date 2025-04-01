@@ -147,28 +147,11 @@ public class PlayerSpawner : MonoBehaviour
             }
         }
         
-        // Make sure the prefab is registered with NetworkManager
-        NetworkObject networkObject = characterPrefab.GetComponent<NetworkObject>();
-        if (networkObject != null)
-        {
-            // Register the prefab if it's not already registered
-            if (!NetworkManager.Singleton.NetworkConfig.Prefabs.Contains(characterPrefab))
-            {
-                NetworkManager.Singleton.NetworkConfig.Prefabs.Add(new NetworkPrefab { Prefab = characterPrefab });
-                Debug.Log($"PlayerSpawner: Registered character prefab: {characterPrefab.name}");
-            }
-        }
-        else
-        {
-            Debug.LogError($"PlayerSpawner: Character prefab {characterPrefab.name} is missing NetworkObject component!");
-            return;
-        }
-        
         Debug.Log($"PlayerSpawner: Spawning character '{characterPrefab.name}' for client {clientId} at {spawnPosition}");
         
         // Instantiate the player
         GameObject playerObj = Instantiate(characterPrefab, spawnPosition, spawnRotation);
-        networkObject = playerObj.GetComponent<NetworkObject>();
+        NetworkObject networkObject = playerObj.GetComponent<NetworkObject>();
         
         if (networkObject != null)
         {

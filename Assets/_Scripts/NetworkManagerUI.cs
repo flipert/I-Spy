@@ -8,13 +8,13 @@ using System.Net.Sockets;
 using System.Collections;
 using UnityEngine.SceneManagement;
 using System.Collections.Generic;
-using Unity.Netcode.Transports.UTP;
-using System;
 
 public class NetworkManagerUI : MonoBehaviour
 {
     [Header("UI References")]
-    [SerializeField] public TMP_InputField ipInputField;
+    [SerializeField] private Button hostButton;
+    [SerializeField] private Button clientButton;
+    [SerializeField] private TMP_InputField ipInputField;
     [SerializeField] private TextMeshProUGUI statusText;
     [SerializeField] private GameObject startupPanel;
     [SerializeField] private CanvasGroup startupCanvasGroup;
@@ -32,13 +32,6 @@ public class NetworkManagerUI : MonoBehaviour
     [SerializeField] private GameObject[] characterPrefabs;
     [SerializeField] private Button[] characterSelectionButtons;
     [SerializeField] private int defaultCharacterIndex = 0;
-
-    [Header("NPC Prefabs")]
-    [SerializeField] private GameObject npcPrefab;
-    
-    [Header("Network Diagnostics")]
-    [SerializeField] private Button pingTestButton;
-    [SerializeField] private int udpTestPort = 7777;
     
     // Singleton pattern
     public static NetworkManagerUI Instance { get; private set; }
@@ -55,12 +48,6 @@ public class NetworkManagerUI : MonoBehaviour
     /// </summary>
     public GameObject[] CharacterPrefabs => characterPrefabs;
     
-    // Add a flag to track if we should show the lobby
-    private bool shouldShowLobby = false;
-
-    // Dictionary to keep track of registered prefabs
-    private Dictionary<uint, GameObject> registeredPrefabs = new Dictionary<uint, GameObject>();
-    
     private void Awake()
     {
         // Singleton setup
@@ -75,64 +62,34 @@ public class NetworkManagerUI : MonoBehaviour
             return;
         }
         
+        // Set the default character
+        selectedCharacterIndex = defaultCharacterIndex;
+        if (characterPrefabs != null && characterPrefabs.Length > 0 && 
+            selectedCharacterIndex >= 0 && selectedCharacterIndex < characterPrefabs.Length)
+        {
+            SelectedCharacterPrefab = characterPrefabs[selectedCharacterIndex];
+        }
+        
         // Setup character selection buttons
         SetupCharacterSelectionButtons();
-        
-        // Set up ping test button if it exists
-        if (pingTestButton != null)
-        {
-            pingTestButton.onClick.AddListener(PingTest);
-        }
-        
-        // Select default character
-        selectedCharacterIndex = Mathf.Clamp(defaultCharacterIndex, 0, characterPrefabs.Length - 1);
-        
-        // Make sure there is a NetworkManager
-        if (NetworkManager.Singleton == null)
-        {
-            Debug.LogWarning("NetworkManager not found, creating one");
-            GameObject networkManagerObj = new GameObject("NetworkManager");
-            NetworkManager networkManager = networkManagerObj.AddComponent<NetworkManager>();
-            
-            // Add Unity Transport
-            networkManagerObj.AddComponent<UnityTransport>();
-            
-            // Ensure NetworkConfig is created
-            networkManager.NetworkConfig = new NetworkConfig();
-            
-            DontDestroyOnLoad(networkManagerObj);
-        }
         
         // Make sure the NetworkManager persists between scenes
         if (NetworkManager.Singleton != null)
         {
             DontDestroyOnLoad(NetworkManager.Singleton.gameObject);
             
-            // Make sure NetworkConfig is not null before accessing it
-            if (NetworkManager.Singleton.NetworkConfig == null)
-            {
-                Debug.LogWarning("NetworkConfig is null, creating a new one");
-                NetworkManager.Singleton.NetworkConfig = new NetworkConfig();
-            }
-            
-            // Now we can safely configure the NetworkConfig
+            // Configure NetworkManager to prevent auto-spawning players
             NetworkManager.Singleton.NetworkConfig.PlayerPrefab = null;
+            
+            // Enable connection approval to control when players can join
             NetworkManager.Singleton.NetworkConfig.ConnectionApproval = true;
-            
-            // Register all necessary prefabs with NetworkManager
-            RegisterAllNetworkPrefabs();
-            
-            // These can be outside the NetworkConfig check
             NetworkManager.Singleton.ConnectionApprovalCallback -= ApproveConnection; // Remove any previous callbacks
             NetworkManager.Singleton.ConnectionApprovalCallback += ApproveConnection;
-
-            // Subscribe to transport failure events
-            NetworkManager.Singleton.OnTransportFailure += OnTransportFailure;
         }
-        else
-        {
-            Debug.LogError("NetworkManager.Singleton is null. Make sure there is a NetworkManager in the scene.");
-        }
+        
+        // Set up button listeners
+        hostButton.onClick.AddListener(OnHostButtonClicked);
+        clientButton.onClick.AddListener(OnClientButtonClicked);
         
         // Set default IP
         if (ipInputField != null)
@@ -160,74 +117,8 @@ public class NetworkManagerUI : MonoBehaviour
         }
         else
         {
-            Debug.LogError("NetworkManager.Singleton is still null after attempt to create it.");
+            Debug.LogError("NetworkManager.Singleton is null. Make sure there is a NetworkManager in the scene.");
         }
-    }
-
-    // New method to register all network prefabs
-    private void RegisterAllNetworkPrefabs()
-    {
-        // Clear our tracking dictionary
-        registeredPrefabs.Clear();
-
-        // Create a new NetworkPrefabs list to ensure compatibility
-        NetworkManager.Singleton.NetworkConfig.Prefabs = new NetworkPrefabs();
-
-        // Register all character prefabs
-        foreach (GameObject prefab in characterPrefabs)
-        {
-            if (prefab != null)
-            {
-                RegisterNetworkPrefab(prefab);
-            }
-        }
-
-        // Register NPC prefab if available
-        if (npcPrefab != null)
-        {
-            RegisterNetworkPrefab(npcPrefab);
-        }
-
-        // Add any other required prefabs here
-        Debug.Log($"Registered {registeredPrefabs.Count} network prefabs");
-        
-        // Log all registered prefabs for debugging
-        foreach (var prefab in registeredPrefabs)
-        {
-            Debug.Log($"Registered prefab: {prefab.Value.name} with hash {prefab.Key}");
-        }
-    }
-
-    // Helper method to register a single prefab
-    private void RegisterNetworkPrefab(GameObject prefab)
-    {
-        if (prefab == null)
-            return;
-
-        NetworkObject networkObject = prefab.GetComponent<NetworkObject>();
-        if (networkObject == null)
-        {
-            Debug.LogError($"Prefab {prefab.name} is missing NetworkObject component!");
-            return;
-        }
-
-        // Calculate a hash from the prefab name for tracking
-        uint prefabHash = (uint)prefab.name.GetHashCode();
-        
-        // Skip if already registered
-        if (registeredPrefabs.ContainsKey(prefabHash))
-        {
-            Debug.LogWarning($"Prefab {prefab.name} is already registered");
-            return;
-        }
-
-        // Add to our tracking dictionary
-        registeredPrefabs[prefabHash] = prefab;
-        
-        // Add to NetworkConfig
-        NetworkManager.Singleton.NetworkConfig.Prefabs.Add(new NetworkPrefab { Prefab = prefab });
-        
-        Debug.Log($"Registered network prefab: {prefab.name} with hash {prefabHash}");
     }
     
     private void SetupCharacterSelectionButtons()
@@ -268,12 +159,6 @@ public class NetworkManagerUI : MonoBehaviour
             SelectedCharacterPrefab = characterPrefabs[characterIndex];
             Debug.Log($"Selected character: {SelectedCharacterPrefab.name}");
             
-            // Make sure this prefab is registered with NetworkManager
-            if (NetworkManager.Singleton?.NetworkConfig?.Prefabs != null)
-            {
-                RegisterNetworkPrefab(SelectedCharacterPrefab);
-            }
-            
             // Highlight the selected button (optional)
             UpdateCharacterSelectionUI();
         }
@@ -304,13 +189,8 @@ public class NetworkManagerUI : MonoBehaviour
             DontDestroyOnLoad(gameObject);
         }
         
-        // Initialize character selection - make sure SelectedCharacterPrefab is set
-        if (SelectedCharacterPrefab == null && characterPrefabs != null && characterPrefabs.Length > 0)
-        {
-            selectedCharacterIndex = Mathf.Clamp(defaultCharacterIndex, 0, characterPrefabs.Length - 1);
-            SelectedCharacterPrefab = characterPrefabs[selectedCharacterIndex];
-            Debug.Log($"Start: Initialized selected character to {SelectedCharacterPrefab.name}");
-        }
+        // Initialize character selection
+        SelectCharacter(selectedCharacterIndex);
     }
     
     private void OnDestroy()
@@ -322,8 +202,89 @@ public class NetworkManagerUI : MonoBehaviour
             NetworkManager.Singleton.OnClientDisconnectCallback -= OnClientDisconnected;
             NetworkManager.Singleton.OnServerStarted -= OnServerStarted;
             NetworkManager.Singleton.ConnectionApprovalCallback -= ApproveConnection;
-            NetworkManager.Singleton.OnTransportFailure -= OnTransportFailure;
         }
+    }
+    
+    private void OnHostButtonClicked()
+    {
+        // Start as host (both server and client)
+        if (NetworkManager.Singleton != null)
+        {
+            // We'll use SceneManagement to handle player spawning after scene load
+            Debug.Log("Starting host - NO player spawning until Game scene loads");
+            
+            // Double-check that player spawning is disabled and connection approval is set up
+            NetworkManager.Singleton.NetworkConfig.PlayerPrefab = null;
+            NetworkManager.Singleton.NetworkConfig.ConnectionApproval = true;
+            
+            // Make sure our callback is registered
+            NetworkManager.Singleton.ConnectionApprovalCallback -= ApproveConnection;
+            NetworkManager.Singleton.ConnectionApprovalCallback += ApproveConnection;
+            
+            NetworkManager.Singleton.StartHost();
+            
+            // Fade out the UI
+            StartCoroutine(FadeOutUI());
+            
+            // Load the game scene directly after a short delay
+            StartCoroutine(LoadGameSceneAfterDelay());
+        }
+    }
+    
+    private void OnClientButtonClicked()
+    {
+        if (NetworkManager.Singleton == null) return;
+        
+        // Make absolutely sure we don't spawn a player in main menu
+        NetworkManager.Singleton.NetworkConfig.PlayerPrefab = null;
+        NetworkManager.Singleton.NetworkConfig.ConnectionApproval = true;
+        
+        // Make sure our callback is registered (even as a client, to stay in sync with server config)
+        NetworkManager.Singleton.ConnectionApprovalCallback -= ApproveConnection;
+        NetworkManager.Singleton.ConnectionApprovalCallback += ApproveConnection;
+        
+        // Get IP from input field
+        string ipAddress = ipInputField != null ? ipInputField.text : defaultIP;
+        if (string.IsNullOrEmpty(ipAddress))
+        {
+            ipAddress = defaultIP;
+        }
+        
+        // Set the connection data
+        NetworkManager.Singleton.GetComponent<Unity.Netcode.Transports.UTP.UnityTransport>().ConnectionData.Address = ipAddress;
+        NetworkManager.Singleton.GetComponent<Unity.Netcode.Transports.UTP.UnityTransport>().ConnectionData.Port = defaultPort;
+        
+        // Start as client
+        Debug.Log("Starting client - NO player spawning until Game scene loads");
+        NetworkManager.Singleton.StartClient();
+        UpdateStatusText("Connecting to " + ipAddress + "...");
+        
+        // Fade out the UI
+        StartCoroutine(FadeOutUI());
+    }
+    
+    private IEnumerator FadeOutUI()
+    {
+        if (startupCanvasGroup == null)
+            yield break;
+            
+        float startTime = Time.time;
+        float startAlpha = startupCanvasGroup.alpha;
+        
+        while (Time.time < startTime + fadeOutDuration)
+        {
+            float t = (Time.time - startTime) / fadeOutDuration;
+            startupCanvasGroup.alpha = Mathf.Lerp(startAlpha, 0f, t);
+            yield return null;
+        }
+        
+        startupCanvasGroup.alpha = 0f;
+        startupCanvasGroup.interactable = false;
+        startupCanvasGroup.blocksRaycasts = false;
+        
+        // Optionally disable the panel after fading
+        if (startupPanel != null)
+            startupPanel.SetActive(false);
     }
     
     private void OnClientConnected(ulong clientId)
@@ -335,45 +296,19 @@ public class NetworkManagerUI : MonoBehaviour
             Debug.Log("This is our local client that connected!");
             UpdateStatusText("Connected as " + (NetworkManager.Singleton.IsHost ? "Host" : "Client"));
             
-            // Only show the lobby if the flag is set (meaning we came from the host/client panels)
-            if (shouldShowLobby)
+            // If we're a client (not host), load the game scene after connection
+            if (!NetworkManager.Singleton.IsHost)
             {
-                ShowLobby();
+                StartCoroutine(LoadGameSceneAfterDelay());
             }
         }
         else if (NetworkManager.Singleton.IsServer || NetworkManager.Singleton.IsHost)
         {
             Debug.Log($"Remote client {clientId} connected to the server");
-            
-            // Add the newly connected client to the lobby player list
-            string playerName = "Player " + clientId;
-            LobbyController.Instance?.AddPlayer(clientId, playerName);
         }
     }
     
-    // Add a new method to show the lobby
-    private void ShowLobby()
-    {
-        // Hide the startup UI
-        if (startupPanel != null)
-        {
-            startupPanel.SetActive(false);
-        }
-        
-        // Show the lobby using LobbyController
-        LobbyController lobbyController = FindObjectOfType<LobbyController>();
-        if (lobbyController != null)
-        {
-            lobbyController.ShowLobby();
-        }
-        else
-        {
-            Debug.LogWarning("LobbyController not found!");
-        }
-    }
-    
-    // Make LoadGameSceneAfterDelay public so the LobbyController can call it when the host clicks "Start"
-    public IEnumerator LoadGameSceneAfterDelay()
+    private IEnumerator LoadGameSceneAfterDelay()
     {
         yield return new WaitForSeconds(sceneLoadDelay);
         
@@ -385,7 +320,7 @@ public class NetworkManagerUI : MonoBehaviour
             NetworkManager.Singleton.SceneManager.OnLoadEventCompleted += OnGameSceneLoaded;
             
             // If we're the host/server, use NetworkManager to switch scenes
-            NetworkManager.Singleton.SceneManager.LoadScene(gameSceneName, UnityEngine.SceneManagement.LoadSceneMode.Single);
+            NetworkManager.Singleton.SceneManager.LoadScene(gameSceneName, LoadSceneMode.Single);
         }
         else if (NetworkManager.Singleton.IsClient)
         {
@@ -482,29 +417,12 @@ public class NetworkManagerUI : MonoBehaviour
     // Helper method to get local IP address
     public static string GetLocalIPAddress()
     {
-        try
+        var host = Dns.GetHostEntry(Dns.GetHostName());
+        foreach (var ip in host.AddressList)
         {
-            // First try to get the public IP address
-            using (var client = new WebClient())
+            if (ip.AddressFamily == AddressFamily.InterNetwork)
             {
-                string publicIP = client.DownloadString("https://api.ipify.org");
-                Debug.Log($"Public IP: {publicIP}");
-                return publicIP;
-            }
-        }
-        catch (Exception ex)
-        {
-            Debug.LogWarning($"Could not get public IP: {ex.Message}. Falling back to local IP.");
-            
-            // Fallback to local IP
-            var host = Dns.GetHostEntry(Dns.GetHostName());
-            foreach (var ip in host.AddressList)
-            {
-                if (ip.AddressFamily == AddressFamily.InterNetwork)
-                {
-                    Debug.Log($"Local IP: {ip}");
-                    return ip.ToString();
-                }
+                return ip.ToString();
             }
         }
         return "127.0.0.1";
@@ -520,504 +438,13 @@ public class NetworkManagerUI : MonoBehaviour
     // Connection approval callback - this controls when players can join
     private void ApproveConnection(NetworkManager.ConnectionApprovalRequest request, NetworkManager.ConnectionApprovalResponse response)
     {
-        Debug.Log($"Connection request received from client {request.ClientNetworkId}");
+        Debug.Log($"Connection approval requested for client ID: {request.ClientNetworkId}");
+        
+        // Always approve the connection
         response.Approved = true;
-    }
-    
-    public void PingTest()
-    {
-        if (ipInputField == null || string.IsNullOrEmpty(ipInputField.text))
-        {
-            UpdateStatusText("Enter an IP address first");
-            return;
-        }
-        
-        string ipAddress = ipInputField.text.Trim();
-
-        // Don't try to ping special addresses
-        if (ipAddress == "0.0.0.0" || ipAddress == "::0")
-        {
-            UpdateStatusText("Cannot ping 0.0.0.0 - Please enter a specific IP address");
-            Debug.LogWarning("Cannot ping unspecified address (0.0.0.0). Use a specific IP address for testing connections.");
-            return;
-        }
-        
-        UpdateStatusText($"Testing connection to {ipAddress}...");
-        
-        StartCoroutine(RunNetworkDiagnostics(ipAddress));
-    }
-    
-    private IEnumerator RunNetworkDiagnostics(string ipAddress)
-    {
-        Debug.Log("Running network diagnostics...");
-        
-        // Test if we can ping the host (ICMP)
-        UpdateStatusText($"Pinging {ipAddress}...");
-        bool pingSuccess = false;
-        
-        // Use UnityEngine.Ping to avoid ambiguity
-        UnityEngine.Ping ping = new UnityEngine.Ping(ipAddress);
-        float startTime = Time.time;
-        float timeout = 5f;
-        
-        // Move the yield outside of try/catch
-        while (!ping.isDone && Time.time - startTime < timeout)
-        {
-            yield return new WaitForSeconds(0.1f);
-        }
-        
-        try
-        {
-            if (ping.isDone && ping.time >= 0)
-            {
-                pingSuccess = true;
-                Debug.Log($"Ping successful! Response time: {ping.time}ms");
-                UpdateStatusText($"Ping successful ({ping.time}ms)");
-            }
-            else
-            {
-                Debug.LogWarning("Ping failed or timed out");
-                UpdateStatusText("Ping failed - host may be unreachable");
-            }
-        }
-        catch (Exception ex)
-        {
-            Debug.LogError($"Error during ping: {ex.Message}");
-            UpdateStatusText("Ping error - check IP address");
-        }
-        
-        yield return new WaitForSeconds(1f);
-        
-        // Test UDP connectivity
-        UpdateStatusText("Testing UDP connectivity...");
-        
-        try
-        {
-            using (var udpClient = new UdpClient())
-            {
-                udpClient.Client.ReceiveTimeout = 5000; // 5 seconds timeout
-                
-                // Try to connect to the server
-                udpClient.Connect(ipAddress, udpTestPort);
-                
-                // Send a test packet
-                byte[] sendBytes = System.Text.Encoding.ASCII.GetBytes("UDPTest");
-                udpClient.Send(sendBytes, sendBytes.Length);
-                
-                Debug.Log($"UDP test packet sent to {ipAddress}:{udpTestPort}");
-                UpdateStatusText("UDP test packet sent. Waiting for response...");
-                
-                try
-                {
-                    // Try to receive a response
-                    IPEndPoint remoteEndPoint = new IPEndPoint(IPAddress.Any, 0);
-                    byte[] receiveBytes = udpClient.Receive(ref remoteEndPoint);
-                    string returnData = System.Text.Encoding.ASCII.GetString(receiveBytes);
-                    
-                    Debug.Log($"UDP test successful! Response: {returnData}");
-                    UpdateStatusText("UDP test successful - connection is possible!");
-                }
-                catch (SocketException ex)
-                {
-                    Debug.LogWarning($"UDP receive failed: {ex.Message}");
-                    UpdateStatusText("UDP test failed - port may be blocked");
-                    
-                    // Additional information about the error
-                    if (ex.SocketErrorCode == SocketError.TimedOut)
-                    {
-                        Debug.LogWarning("UDP timeout - no response received");
-                        // If ping succeeded but UDP failed, likely a port forwarding issue
-                        if (pingSuccess)
-                        {
-                            UpdateStatusText("Host reachable but port 7777 is blocked or not forwarded");
-                        }
-                    }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            Debug.LogError($"Error during UDP test: {ex.Message}");
-            UpdateStatusText("UDP test error - network may be restricted");
-        }
-        
-        // Final assessment
-        yield return new WaitForSeconds(1f);
-        if (!pingSuccess)
-        {
-            UpdateStatusText("Host IP is unreachable. Check the IP address or internet connection.");
-        }
-        else
-        {
-            UpdateStatusText("Host is reachable, but port 7777 may be blocked. Check port forwarding on host router.");
-        }
-    }
-    
-    public void OnClientButtonClicked()
-    {
-        if (NetworkManager.Singleton == null)
-        {
-            Debug.LogError("NetworkManager.Singleton is null when trying to start client!");
-            UpdateStatusText("Error: NetworkManager not found!");
-            return;
-        }
-        
-        // Set the flag to show lobby after connection
-        shouldShowLobby = true;
-        
-        // Get IP from input field with validation
-        string ipAddress = ipInputField != null ? ipInputField.text.Trim() : defaultIP;
-        if (string.IsNullOrEmpty(ipAddress))
-        {
-            ipAddress = defaultIP;
-        }
-        
-        // Validate IP format to prevent connection errors
-        if (!IPAddress.TryParse(ipAddress, out IPAddress _))
-        {
-            Debug.LogError($"Invalid IP format: {ipAddress}, defaulting to {defaultIP}");
-            UpdateStatusText($"Invalid IP format. Using {defaultIP} instead.");
-            ipAddress = defaultIP;
-        }
-        
-        Debug.Log($"Attempting to connect to IP: {ipAddress}");
-        UpdateStatusText($"Attempting to connect to {ipAddress}...");
-        
-        // Check for and configure transport
-        var transport = NetworkManager.Singleton.GetComponent<UnityTransport>();
-        if (transport == null)
-        {
-            Debug.LogError("Unity Transport component missing! Adding one...");
-            transport = NetworkManager.Singleton.gameObject.AddComponent<UnityTransport>();
-        }
-        
-        // Configure transport data
-        transport.ConnectionData.Address = ipAddress;
-        transport.ConnectionData.Port = defaultPort;
-        
-        // Make connection more reliable - increase timeouts and attempts
-        transport.MaxConnectAttempts = 5;         // Increased from 3 to 5 attempts
-        transport.ConnectTimeoutMS = 15000;       // Increased from 10s to 15s
-        // Transport doesn't support this property in this version
-        // transport.MaximumFragmentedMessageSize = 16384;
-        transport.HeartbeatTimeoutMS = 30000;     // Increased heartbeat timeout
-        
-        Debug.Log($"Transport configured - Address: {transport.ConnectionData.Address}, Port: {transport.ConnectionData.Port}");
-        Debug.Log($"Connection settings: MaxAttempts={transport.MaxConnectAttempts}, Timeout={transport.ConnectTimeoutMS}ms");
-        
-        // Ensure NetworkConfig is properly set up
-        if (NetworkManager.Singleton.NetworkConfig == null)
-        {
-            NetworkManager.Singleton.NetworkConfig = new NetworkConfig();
-        }
-        
-        NetworkManager.Singleton.NetworkConfig.PlayerPrefab = null;
-        NetworkManager.Singleton.NetworkConfig.ConnectionApproval = true;
-        NetworkManager.Singleton.NetworkConfig.NetworkTransport = transport;
-        
-        // Register all prefabs before starting the client
-        RegisterAllNetworkPrefabs();
-        
-        // Store reference to the active coroutine so we can stop it if needed
-        StartCoroutine(ShowConnectingUI());
-        
-        try
-        {
-            Debug.Log("Starting client connection attempt...");
-            NetworkManager.Singleton.StartClient();
-            LogRegisteredPrefabs();
-            
-            // Start a new coroutine that checks connection status and handles timeout
-            StartCoroutine(ConnectionTimeoutCheck());
-        }
-        catch (Exception ex)
-        {
-            Debug.LogError($"Failed to start client: {ex.Message}\n{ex.StackTrace}");
-            UpdateStatusText($"Connection failed: {ex.Message}");
-            StopAllCoroutines();
-            RecoverUI("Exception during connection attempt. Please try again.");
-        }
-    }
-    
-    private IEnumerator ShowConnectingUI()
-    {
-        // Show connecting animation/text
-        UpdateStatusText("Connecting...");
-        
-        float blinkInterval = 0.5f;
-        int dotCount = 0;
-        
-        while (true)
-        {
-            dotCount = (dotCount + 1) % 4;
-            string dots = new string('.', dotCount);
-            UpdateStatusText($"Connecting{dots}");
-            yield return new WaitForSeconds(blinkInterval);
-        }
-    }
-    
-    private IEnumerator ConnectionTimeoutCheck()
-    {
-        float timeoutDuration = 15f; // 15 seconds timeout
-        float startTime = Time.time;
-        
-        // Periodically check connection status
-        while (Time.time - startTime < timeoutDuration)
-        {
-            // If connected successfully, stop checking
-            if (NetworkManager.Singleton.IsConnectedClient)
-            {
-                Debug.Log("Successfully connected to host!");
-                StopCoroutine(ShowConnectingUI());
-                StartCoroutine(FadeOutUI());
-                yield break;
-            }
-            
-            // If disconnected (connection failed after initial attempt), recover UI
-            if (NetworkManager.Singleton.IsListening && !NetworkManager.Singleton.IsConnectedClient)
-            {
-                Debug.LogWarning("Connection attempt failed - network is listening but not connected");
-                StopCoroutine(ShowConnectingUI());
-                RecoverUI("Connection attempt failed. Please check the IP address and try again.");
-                yield break;
-            }
-            
-            yield return new WaitForSeconds(0.5f);
-        }
-        
-        // If we get here, connection timed out
-        Debug.LogWarning("Connection attempt timed out after " + timeoutDuration + " seconds");
-        StopCoroutine(ShowConnectingUI());
-        
-        // Try to clean up the failed connection
-        if (NetworkManager.Singleton.IsClient)
-        {
-            NetworkManager.Singleton.Shutdown();
-        }
-        
-        RecoverUI("Connection timed out. Please check the IP address and ensure port 7777 is forwarded on the host.");
-    }
-    
-    // Helper method to recover UI after a failed connection attempt
-    private void RecoverUI(string errorMessage)
-    {
-        // Show the error message
-        UpdateStatusText(errorMessage);
-        
-        // Show the startup panel again
-        if (startupPanel != null)
-        {
-            startupPanel.SetActive(true);
-            if (startupCanvasGroup != null)
-            {
-                startupCanvasGroup.alpha = 1f;
-                startupCanvasGroup.interactable = true;
-                startupCanvasGroup.blocksRaycasts = true;
-            }
-        }
-    }
-    
-    public void OnHostButtonClicked()
-    {
-        if (NetworkManager.Singleton != null)
-        {
-            // Show host information
-            ShowHostInfo();
-            
-            shouldShowLobby = true;
-            
-            var transport = NetworkManager.Singleton.GetComponent<UnityTransport>();
-            if (transport == null)
-            {
-                Debug.LogError("Unity Transport component missing! Adding one...");
-                transport = NetworkManager.Singleton.gameObject.AddComponent<UnityTransport>();
-            }
-            
-            // When hosting, bind to all available network interfaces
-            transport.ConnectionData.Address = "0.0.0.0";
-            transport.ConnectionData.Port = defaultPort;
-            
-            // Make connection more reliable - increase timeouts and attempts
-            transport.MaxConnectAttempts = 5;         // Increased from 3 to 5 attempts
-            transport.ConnectTimeoutMS = 15000;       // Increased from 10s to 15s
-            transport.HeartbeatTimeoutMS = 30000;     // Increased heartbeat timeout
-            
-            Debug.Log($"Host binding to all interfaces (0.0.0.0) on port {defaultPort}");
-            Debug.Log($"Connection settings: MaxAttempts={transport.MaxConnectAttempts}, Timeout={transport.ConnectTimeoutMS}ms");
-            
-            // Show the IP address that others should use to connect
-            string publicIP = GetLocalIPAddress();
-            string externalIP = GetPublicIPAddress();
-            
-            if (!string.IsNullOrEmpty(externalIP))
-            {
-                UpdateStatusText($"Starting host... Others can connect to: {externalIP} on port {defaultPort}");
-                
-                // Display port forwarding instructions in the console
-                Debug.Log($"======================== IMPORTANT ========================");
-                Debug.Log($"FOR LOCAL NETWORK: Friends can connect to: {publicIP}:{defaultPort}");
-                Debug.Log($"FOR INTERNET: Friends can connect to: {externalIP}:{defaultPort}");
-                Debug.Log($"You MUST forward port {defaultPort} (UDP) to your PC's local IP ({publicIP}) in your router");
-                Debug.Log($"==========================================================");
-            }
-            else
-            {
-                UpdateStatusText($"Starting host... Others can connect to: {publicIP} on port {defaultPort}");
-                
-                // Display port forwarding instructions in the console
-                Debug.Log($"======================== IMPORTANT ========================");
-                Debug.Log($"FOR LOCAL NETWORK: Friends can connect to: {publicIP}:{defaultPort}");
-                Debug.Log($"FOR INTERNET: Please check your public IP by visiting whatismyip.com");
-                Debug.Log($"You MUST forward port {defaultPort} (UDP) to your PC's local IP ({publicIP}) in your router");
-                Debug.Log($"==========================================================");
-            }
-            
-            // Ensure NetworkConfig is properly set up
-            if (NetworkManager.Singleton.NetworkConfig == null)
-            {
-                NetworkManager.Singleton.NetworkConfig = new NetworkConfig();
-            }
-            
-            NetworkManager.Singleton.NetworkConfig.PlayerPrefab = null;
-            NetworkManager.Singleton.NetworkConfig.ConnectionApproval = true;
-            NetworkManager.Singleton.NetworkConfig.NetworkTransport = transport;
-            
-            // Register all prefabs before starting the host
-            RegisterAllNetworkPrefabs();
-            
-            NetworkManager.Singleton.ConnectionApprovalCallback -= ApproveConnection;
-            NetworkManager.Singleton.ConnectionApprovalCallback += ApproveConnection;
-            
-            try
-            {
-                NetworkManager.Singleton.StartHost();
-                Debug.Log("Host started successfully");
-                LogRegisteredPrefabs();
-                StartCoroutine(FadeOutUI());
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"Failed to start host: {ex.Message}\n{ex.StackTrace}");
-                UpdateStatusText($"Failed to start host: {ex.Message}");
-            }
-        }
-        else
-        {
-            Debug.LogError("NetworkManager.Singleton is null when trying to start host!");
-            UpdateStatusText("Error: NetworkManager not found!");
-        }
-    }
-    
-    // Helper method to get public IP address
-    private string GetPublicIPAddress()
-    {
-        try
-        {
-            using (var client = new System.Net.WebClient())
-            {
-                // Use a public service to get our external IP
-                string externalIP = client.DownloadString("https://api.ipify.org").Trim();
-                return externalIP;
-            }
-        }
-        catch (Exception ex)
-        {
-            Debug.LogWarning($"Could not determine public IP address: {ex.Message}");
-            return string.Empty;
-        }
-    }
-    
-    // Helper method to log all registered prefabs for debugging
-    private void LogRegisteredPrefabs()
-    {
-        if (NetworkManager.Singleton?.NetworkConfig?.Prefabs != null)
-        {
-            int prefabCount = registeredPrefabs.Count;
-            Debug.Log($"Total registered network prefabs: {prefabCount}");
-            foreach (var prefab in registeredPrefabs)
-            {
-                Debug.Log($"Registered prefab: {prefab.Value.name}");
-            }
-        }
-        else
-        {
-            Debug.LogError("Cannot list registered prefabs - NetworkConfig or Prefabs list is null");
-        }
-    }
-    
-    private IEnumerator FadeOutUI()
-    {
-        if (startupCanvasGroup == null)
-            yield break;
-            
-        float startTime = Time.time;
-        float startAlpha = startupCanvasGroup.alpha;
-        
-        while (Time.time < startTime + fadeOutDuration)
-        {
-            float t = (Time.time - startTime) / fadeOutDuration;
-            startupCanvasGroup.alpha = Mathf.Lerp(startAlpha, 0f, t);
-            yield return null;
-        }
-        
-        startupCanvasGroup.alpha = 0f;
-        startupCanvasGroup.interactable = false;
-        startupCanvasGroup.blocksRaycasts = false;
-        
-        // Optionally disable the panel after fading
-        if (startupPanel != null)
-            startupPanel.SetActive(false);
-    }
-
-    private void OnTransportFailure()
-    {
-        Debug.LogError("Transport failure occurred. Check your network settings and port forwarding.");
-        UpdateStatusText("Connection failed: Transport error. Check your network settings.");
-    }
-
-    // Helper method to get the local LAN IP (for port forwarding setup)
-    public static string GetLocalLANIP()
-    {
-        try
-        {
-            var host = Dns.GetHostEntry(Dns.GetHostName());
-            foreach (var ip in host.AddressList)
-            {
-                if (ip.AddressFamily == AddressFamily.InterNetwork)
-                {
-                    Debug.Log($"Local LAN IP: {ip}");
-                    return ip.ToString();
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            Debug.LogError($"Error getting local IP: {ex.Message}");
-        }
-        return "127.0.0.1";
-    }
-    
-    // Show detailed host information for port forwarding
-    public void ShowHostInfo()
-    {
-        string publicIP = GetLocalIPAddress();
-        string localIP = GetLocalLANIP();
-        
-        string message = 
-            $"YOUR HOST INFO:\n" +
-            $"Public IP: {publicIP}\n" +
-            $"Local IP: {localIP}\n" +
-            $"Port: {defaultPort} (UDP)\n\n" +
-            $"FORWARD PORT {defaultPort} TO {localIP} IN YOUR ROUTER";
-            
-        UpdateStatusText(message);
-        
-        Debug.Log($"======================== PORT FORWARDING INSTRUCTIONS ========================");
-        Debug.Log($"1. Access your router admin page (typically http://192.168.1.1 or http://192.168.0.1)");
-        Debug.Log($"2. Find 'Port Forwarding' section (might be under 'Advanced Settings')");
-        Debug.Log($"3. Add a new rule to forward UDP port {defaultPort} to your local IP: {localIP}");
-        Debug.Log($"4. Save settings and restart router if necessary");
-        Debug.Log($"5. Test connection using an online port checker");
-        Debug.Log($"==========================================================================");
+        response.CreatePlayerObject = false; // Don't create player object automatically
+        response.Position = Vector3.zero;
+        response.Rotation = Quaternion.identity;
+        response.Pending = false;
     }
 } 
