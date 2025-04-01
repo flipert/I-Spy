@@ -656,10 +656,18 @@ public class NetworkManagerUI : MonoBehaviour
         // Set the flag to show lobby after connection
         shouldShowLobby = true;
         
-        // Get IP from input field
+        // Get IP from input field with validation
         string ipAddress = ipInputField != null ? ipInputField.text.Trim() : defaultIP;
         if (string.IsNullOrEmpty(ipAddress))
         {
+            ipAddress = defaultIP;
+        }
+        
+        // Validate IP format to prevent connection errors
+        if (!IPAddress.TryParse(ipAddress, out IPAddress _))
+        {
+            Debug.LogError($"Invalid IP format: {ipAddress}, defaulting to {defaultIP}");
+            UpdateStatusText($"Invalid IP format. Using {defaultIP} instead.");
             ipAddress = defaultIP;
         }
         

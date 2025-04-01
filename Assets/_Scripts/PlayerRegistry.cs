@@ -6,7 +6,7 @@ using System;
 
 // Custom serializable class to replace ulong[] in NetworkVariable
 [Serializable]
-public struct PlayerAvatarData : IEquatable<PlayerAvatarData>
+public struct PlayerAvatarData : IEquatable<PlayerAvatarData>, INetworkSerializable
 {
     public ulong[] data;
 
@@ -30,6 +30,26 @@ public struct PlayerAvatarData : IEquatable<PlayerAvatarData>
                 return false;
         }
         return true;
+    }
+
+    // Implement INetworkSerializable interface
+    public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
+    {
+        // Serialize the array length first
+        int length = data != null ? data.Length : 0;
+        serializer.SerializeValue(ref length);
+
+        // If deserializing, initialize the array
+        if (serializer.IsReader)
+        {
+            data = new ulong[length];
+        }
+
+        // Serialize each array element
+        for (int i = 0; i < length; i++)
+        {
+            serializer.SerializeValue(ref data[i]);
+        }
     }
 }
 

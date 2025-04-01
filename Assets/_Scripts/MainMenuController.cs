@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 using Unity.Netcode;
+using System.Net;
 
 public class MainMenuController : MonoBehaviour
 {
@@ -223,10 +224,26 @@ public class MainMenuController : MonoBehaviour
             
         PlayerPrefs.SetString("PlayerName", playerName);
         
-        // Set IP address
-        string ipAddress = "127.0.0.1";
+        // Set IP address with proper validation
+        string ipAddress = "127.0.0.1"; // Default to localhost
+        
         if (ipAddressInput != null && !string.IsNullOrEmpty(ipAddressInput.text))
-            ipAddress = ipAddressInput.text;
+        {
+            // Validate IP format
+            string input = ipAddressInput.text.Trim();
+            if (IPAddress.TryParse(input, out IPAddress _))
+            {
+                ipAddress = input;
+                Debug.Log($"Valid IP address entered: {ipAddress}");
+            }
+            else
+            {
+                // Handle invalid IP - show warning and use default
+                Debug.LogWarning($"Invalid IP format entered: {input}, using localhost instead");
+                ipAddress = "127.0.0.1";
+                // Optional: Show UI feedback that IP was invalid
+            }
+        }
             
         // Set the IP address directly on the NetworkManagerUI's ipInputField
         if (networkManagerUI.ipInputField != null)
