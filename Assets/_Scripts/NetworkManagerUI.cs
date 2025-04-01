@@ -533,6 +533,15 @@ public class NetworkManagerUI : MonoBehaviour
         }
         
         string ipAddress = ipInputField.text.Trim();
+
+        // Don't try to ping special addresses
+        if (ipAddress == "0.0.0.0" || ipAddress == "::0")
+        {
+            UpdateStatusText("Cannot ping 0.0.0.0 - Please enter a specific IP address");
+            Debug.LogWarning("Cannot ping unspecified address (0.0.0.0). Use a specific IP address for testing connections.");
+            return;
+        }
+        
         UpdateStatusText($"Testing connection to {ipAddress}...");
         
         StartCoroutine(RunNetworkDiagnostics(ipAddress));
@@ -831,8 +840,6 @@ public class NetworkManagerUI : MonoBehaviour
             // Make connection more reliable - increase timeouts and attempts
             transport.MaxConnectAttempts = 5;         // Increased from 3 to 5 attempts
             transport.ConnectTimeoutMS = 15000;       // Increased from 10s to 15s
-            // Transport doesn't support this property in this version
-            // transport.MaximumFragmentedMessageSize = 16384;
             transport.HeartbeatTimeoutMS = 30000;     // Increased heartbeat timeout
             
             Debug.Log($"Host binding to all interfaces (0.0.0.0) on port {defaultPort}");
@@ -840,15 +847,30 @@ public class NetworkManagerUI : MonoBehaviour
             
             // Show the IP address that others should use to connect
             string publicIP = GetLocalIPAddress();
-            UpdateStatusText($"Starting host... Others can connect to: {publicIP} on port {defaultPort}");
+            string externalIP = GetPublicIPAddress();
             
-            // Display port forwarding instructions in the console
-            Debug.Log($"======================== IMPORTANT ========================");
-            Debug.Log($"FOR FRIENDS TO CONNECT OVER THE INTERNET:");
-            Debug.Log($"1. Your public IP is: {publicIP}");
-            Debug.Log($"2. You MUST forward port {defaultPort} (UDP) to your PC's local IP in your router");
-            Debug.Log($"3. Visit https://portforward.com/ for instructions for your router model");
-            Debug.Log($"==========================================================");
+            if (!string.IsNullOrEmpty(externalIP))
+            {
+                UpdateStatusText($"Starting host... Others can connect to: {externalIP} on port {defaultPort}");
+                
+                // Display port forwarding instructions in the console
+                Debug.Log($"======================== IMPORTANT ========================");
+                Debug.Log($"FOR LOCAL NETWORK: Friends can connect to: {publicIP}:{defaultPort}");
+                Debug.Log($"FOR INTERNET: Friends can connect to: {externalIP}:{defaultPort}");
+                Debug.Log($"You MUST forward port {defaultPort} (UDP) to your PC's local IP ({publicIP}) in your router");
+                Debug.Log($"==========================================================");
+            }
+            else
+            {
+                UpdateStatusText($"Starting host... Others can connect to: {publicIP} on port {defaultPort}");
+                
+                // Display port forwarding instructions in the console
+                Debug.Log($"======================== IMPORTANT ========================");
+                Debug.Log($"FOR LOCAL NETWORK: Friends can connect to: {publicIP}:{defaultPort}");
+                Debug.Log($"FOR INTERNET: Please check your public IP by visiting whatismyip.com");
+                Debug.Log($"You MUST forward port {defaultPort} (UDP) to your PC's local IP ({publicIP}) in your router");
+                Debug.Log($"==========================================================");
+            }
             
             // Ensure NetworkConfig is properly set up
             if (NetworkManager.Singleton.NetworkConfig == null)
@@ -883,6 +905,25 @@ public class NetworkManagerUI : MonoBehaviour
         {
             Debug.LogError("NetworkManager.Singleton is null when trying to start host!");
             UpdateStatusText("Error: NetworkManager not found!");
+        }
+    }
+    
+    // Helper method to get public IP address
+    private string GetPublicIPAddress()
+    {
+        try
+        {
+            using (var client = new System.Net.WebClient())
+            {
+                // Use a public service to get our external IP
+                string externalIP = client.DownloadString("https://api.ipify.org").Trim();
+                return externalIP;
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.LogWarning($"Could not determine public IP address: {ex.Message}");
+            return string.Empty;
         }
     }
     
