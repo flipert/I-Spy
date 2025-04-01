@@ -546,17 +546,19 @@ public class NetworkManagerUI : MonoBehaviour
         UpdateStatusText($"Pinging {ipAddress}...");
         bool pingSuccess = false;
         
+        // Use UnityEngine.Ping to avoid ambiguity
+        UnityEngine.Ping ping = new UnityEngine.Ping(ipAddress);
+        float startTime = Time.time;
+        float timeout = 5f;
+        
+        // Move the yield outside of try/catch
+        while (!ping.isDone && Time.time - startTime < timeout)
+        {
+            yield return new WaitForSeconds(0.1f);
+        }
+        
         try
         {
-            Ping ping = new Ping(ipAddress);
-            float startTime = Time.time;
-            float timeout = 5f;
-            
-            while (!ping.isDone && Time.time - startTime < timeout)
-            {
-                yield return new WaitForSeconds(0.1f);
-            }
-            
             if (ping.isDone && ping.time >= 0)
             {
                 pingSuccess = true;
@@ -679,7 +681,8 @@ public class NetworkManagerUI : MonoBehaviour
         // Make connection more reliable - increase timeouts and attempts
         transport.MaxConnectAttempts = 5;         // Increased from 3 to 5 attempts
         transport.ConnectTimeoutMS = 15000;       // Increased from 10s to 15s
-        transport.MaximumFragmentedMessageSize = 16384; // Increase fragment size
+        // Transport doesn't support this property in this version
+        // transport.MaximumFragmentedMessageSize = 16384;
         transport.HeartbeatTimeoutMS = 30000;     // Increased heartbeat timeout
         
         Debug.Log($"Transport configured - Address: {transport.ConnectionData.Address}, Port: {transport.ConnectionData.Port}");
@@ -820,7 +823,8 @@ public class NetworkManagerUI : MonoBehaviour
             // Make connection more reliable - increase timeouts and attempts
             transport.MaxConnectAttempts = 5;         // Increased from 3 to 5 attempts
             transport.ConnectTimeoutMS = 15000;       // Increased from 10s to 15s
-            transport.MaximumFragmentedMessageSize = 16384; // Increase fragment size
+            // Transport doesn't support this property in this version
+            // transport.MaximumFragmentedMessageSize = 16384;
             transport.HeartbeatTimeoutMS = 30000;     // Increased heartbeat timeout
             
             Debug.Log($"Host binding to all interfaces (0.0.0.0) on port {defaultPort}");
