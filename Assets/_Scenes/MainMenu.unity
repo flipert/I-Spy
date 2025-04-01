@@ -1341,6 +1341,7 @@ MonoBehaviour:
   - {fileID: 1814603321}
   - {fileID: 0}
   defaultCharacterIndex: 0
+  npcPrefab: {fileID: 0}
 --- !u!114 &250193483
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -5048,7 +5049,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 3.544}
   m_AnchorMin: {x: 0, y: 0.5}
   m_AnchorMax: {x: 0, y: 0.5}
-  m_AnchoredPosition: {x: 359, y: -43}
+  m_AnchoredPosition: {x: 359, y: -78}
   m_SizeDelta: {x: 307.78003, y: 315.14}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &1066335117
@@ -7516,7 +7517,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0.5}
   m_AnchorMax: {x: 0, y: 0.5}
-  m_AnchoredPosition: {x: 319, y: 195}
+  m_AnchoredPosition: {x: 319, y: 160}
   m_SizeDelta: {x: 390.2129, y: 186.63422}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &1591926585

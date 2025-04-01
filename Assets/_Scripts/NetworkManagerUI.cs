@@ -9,6 +9,7 @@ using System.Collections;
 using UnityEngine.SceneManagement;
 using System.Collections.Generic;
 using Unity.Netcode.Transports.UTP;
+using System;
 
 public class NetworkManagerUI : MonoBehaviour
 {
@@ -461,12 +462,29 @@ public class NetworkManagerUI : MonoBehaviour
     // Helper method to get local IP address
     public static string GetLocalIPAddress()
     {
-        var host = Dns.GetHostEntry(Dns.GetHostName());
-        foreach (var ip in host.AddressList)
+        try
         {
-            if (ip.AddressFamily == AddressFamily.InterNetwork)
+            // First try to get the public IP address
+            using (var client = new WebClient())
             {
-                return ip.ToString();
+                string publicIP = client.DownloadString("https://api.ipify.org");
+                Debug.Log($"Public IP: {publicIP}");
+                return publicIP;
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.LogWarning($"Could not get public IP: {ex.Message}. Falling back to local IP.");
+            
+            // Fallback to local IP
+            var host = Dns.GetHostEntry(Dns.GetHostName());
+            foreach (var ip in host.AddressList)
+            {
+                if (ip.AddressFamily == AddressFamily.InterNetwork)
+                {
+                    Debug.Log($"Local IP: {ip}");
+                    return ip.ToString();
+                }
             }
         }
         return "127.0.0.1";
@@ -494,53 +512,46 @@ public class NetworkManagerUI : MonoBehaviour
     
     public void OnHostButtonClicked()
     {
-        // Start as host (both server and client)
         if (NetworkManager.Singleton != null)
         {
-            // Set the flag to show lobby after connection
             shouldShowLobby = true;
             
-            // We'll use SceneManagement to handle player spawning after scene load
-            Debug.Log("Starting host - NO player spawning until Game scene loads");
-            
-            // Check for and configure transport
-            var transport = NetworkManager.Singleton.GetComponent<Unity.Netcode.Transports.UTP.UnityTransport>();
+            var transport = NetworkManager.Singleton.GetComponent<UnityTransport>();
             if (transport == null)
             {
                 Debug.LogError("Unity Transport component missing! Adding one...");
-                transport = NetworkManager.Singleton.gameObject.AddComponent<Unity.Netcode.Transports.UTP.UnityTransport>();
+                transport = NetworkManager.Singleton.gameObject.AddComponent<UnityTransport>();
             }
             
-            // Configure transport data
-            transport.ConnectionData.Address = defaultIP;
+            // When hosting, bind to all available network interfaces
+            transport.ConnectionData.Address = "0.0.0.0";
             transport.ConnectionData.Port = defaultPort;
             
-            // Check if NetworkConfig is not null
+            Debug.Log($"Host binding to all interfaces (0.0.0.0) on port {defaultPort}");
+            
+            // Show the IP address that others should use to connect
+            string publicIP = GetLocalIPAddress();
+            UpdateStatusText($"Starting host... Others can connect to: {publicIP}");
+            
             if (NetworkManager.Singleton.NetworkConfig != null)
             {
-                // Double-check that player spawning is disabled and connection approval is set up
                 NetworkManager.Singleton.NetworkConfig.PlayerPrefab = null;
                 NetworkManager.Singleton.NetworkConfig.ConnectionApproval = true;
                 NetworkManager.Singleton.NetworkConfig.NetworkTransport = transport;
-                
-                // Make sure all necessary prefabs are registered
                 RegisterAllNetworkPrefabs();
             }
             else
             {
                 Debug.LogError("NetworkManager.Singleton.NetworkConfig is null. Creating a new one.");
-                NetworkManager.Singleton.NetworkConfig = new Unity.Netcode.NetworkConfig
+                NetworkManager.Singleton.NetworkConfig = new NetworkConfig
                 {
                     PlayerPrefab = null,
                     ConnectionApproval = true,
                     NetworkTransport = transport
                 };
-                
-                // Register prefabs on the new NetworkConfig
                 RegisterAllNetworkPrefabs();
             }
             
-            // Make sure our callback is registered
             NetworkManager.Singleton.ConnectionApprovalCallback -= ApproveConnection;
             NetworkManager.Singleton.ConnectionApprovalCallback += ApproveConnection;
             
@@ -548,21 +559,19 @@ public class NetworkManagerUI : MonoBehaviour
             {
                 NetworkManager.Singleton.StartHost();
                 Debug.Log("Host started successfully");
-                
-                // Log all registered prefabs for debugging
                 LogRegisteredPrefabs();
-                
-                // Fade out the UI
                 StartCoroutine(FadeOutUI());
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
                 Debug.LogError($"Failed to start host: {ex.Message}\n{ex.StackTrace}");
+                UpdateStatusText($"Failed to start host: {ex.Message}");
             }
         }
         else
         {
             Debug.LogError("NetworkManager.Singleton is null when trying to start host!");
+            UpdateStatusText("Error: NetworkManager not found!");
         }
     }
     
@@ -571,6 +580,7 @@ public class NetworkManagerUI : MonoBehaviour
         if (NetworkManager.Singleton == null)
         {
             Debug.LogError("NetworkManager.Singleton is null when trying to start client!");
+            UpdateStatusText("Error: NetworkManager not found!");
             return;
         }
         
@@ -578,69 +588,107 @@ public class NetworkManagerUI : MonoBehaviour
         shouldShowLobby = true;
         
         // Get IP from input field
-        string ipAddress = ipInputField != null ? ipInputField.text : defaultIP;
+        string ipAddress = ipInputField != null ? ipInputField.text.Trim() : defaultIP;
         if (string.IsNullOrEmpty(ipAddress))
         {
             ipAddress = defaultIP;
         }
         
+        Debug.Log($"Attempting to connect to IP: {ipAddress}");
+        UpdateStatusText($"Attempting to connect to {ipAddress}...");
+        
         // Check for and configure transport
-        var transport = NetworkManager.Singleton.GetComponent<Unity.Netcode.Transports.UTP.UnityTransport>();
+        var transport = NetworkManager.Singleton.GetComponent<UnityTransport>();
         if (transport == null)
         {
             Debug.LogError("Unity Transport component missing! Adding one...");
-            transport = NetworkManager.Singleton.gameObject.AddComponent<Unity.Netcode.Transports.UTP.UnityTransport>();
+            transport = NetworkManager.Singleton.gameObject.AddComponent<UnityTransport>();
         }
         
         // Configure transport data
         transport.ConnectionData.Address = ipAddress;
         transport.ConnectionData.Port = defaultPort;
         
+        Debug.Log($"Transport configured - Address: {transport.ConnectionData.Address}, Port: {transport.ConnectionData.Port}");
+        
         // Check if NetworkConfig is not null
         if (NetworkManager.Singleton.NetworkConfig != null)
         {
-            // Make absolutely sure we don't spawn a player in main menu
             NetworkManager.Singleton.NetworkConfig.PlayerPrefab = null;
             NetworkManager.Singleton.NetworkConfig.ConnectionApproval = true;
             NetworkManager.Singleton.NetworkConfig.NetworkTransport = transport;
             
-            // Make sure all necessary prefabs are registered
             RegisterAllNetworkPrefabs();
         }
         else
         {
             Debug.LogError("NetworkManager.Singleton.NetworkConfig is null. Creating a new one.");
-            NetworkManager.Singleton.NetworkConfig = new Unity.Netcode.NetworkConfig
+            NetworkManager.Singleton.NetworkConfig = new NetworkConfig
             {
                 PlayerPrefab = null,
                 ConnectionApproval = true,
                 NetworkTransport = transport
             };
             
-            // Register prefabs on the new NetworkConfig
             RegisterAllNetworkPrefabs();
         }
         
-        // Make sure our callback is registered
-        NetworkManager.Singleton.ConnectionApprovalCallback -= ApproveConnection;
-        NetworkManager.Singleton.ConnectionApprovalCallback += ApproveConnection;
+        // Add connection timeout handling
+        StartCoroutine(ConnectionTimeoutCheck());
         
         try
         {
-            // Start as client
-            Debug.Log("Starting client - NO player spawning until Game scene loads");
+            Debug.Log("Starting client connection attempt...");
             NetworkManager.Singleton.StartClient();
-            UpdateStatusText("Connecting to " + ipAddress + "...");
             
-            // Log all registered prefabs for debugging
             LogRegisteredPrefabs();
-            
-            // Fade out the UI
             StartCoroutine(FadeOutUI());
         }
-        catch (System.Exception ex)
+        catch (Exception ex)
         {
             Debug.LogError($"Failed to start client: {ex.Message}\n{ex.StackTrace}");
+            UpdateStatusText($"Connection failed: {ex.Message}");
+            StopCoroutine(ConnectionTimeoutCheck());
+        }
+    }
+    
+    private IEnumerator ConnectionTimeoutCheck()
+    {
+        float timeoutDuration = 10f; // 10 seconds timeout
+        float startTime = Time.time;
+        
+        while (Time.time - startTime < timeoutDuration)
+        {
+            if (NetworkManager.Singleton.IsConnectedClient)
+            {
+                yield break; // Successfully connected
+            }
+            yield return new WaitForSeconds(0.5f);
+        }
+        
+        // If we get here, connection timed out
+        if (!NetworkManager.Singleton.IsConnectedClient)
+        {
+            Debug.LogWarning("Connection attempt timed out");
+            UpdateStatusText("Connection timed out. Please check the IP address and try again.");
+            
+            // Try to clean up the failed connection
+            if (NetworkManager.Singleton.IsClient)
+            {
+                NetworkManager.Singleton.Shutdown();
+            }
+            
+            // Show the startup panel again
+            if (startupPanel != null)
+            {
+                startupPanel.SetActive(true);
+                if (startupCanvasGroup != null)
+                {
+                    startupCanvasGroup.alpha = 1f;
+                    startupCanvasGroup.interactable = true;
+                    startupCanvasGroup.blocksRaycasts = true;
+                }
+            }
         }
     }
     
