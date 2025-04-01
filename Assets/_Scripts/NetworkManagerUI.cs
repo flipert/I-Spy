@@ -36,6 +36,10 @@ public class NetworkManagerUI : MonoBehaviour
     [Header("NPC Prefabs")]
     [SerializeField] private GameObject npcPrefab;
     
+    [Header("Network Diagnostics")]
+    [SerializeField] private Button pingTestButton;
+    [SerializeField] private int udpTestPort = 7777;
+    
     // Singleton pattern
     public static NetworkManagerUI Instance { get; private set; }
     
@@ -73,6 +77,12 @@ public class NetworkManagerUI : MonoBehaviour
         
         // Setup character selection buttons
         SetupCharacterSelectionButtons();
+        
+        // Set up ping test button if it exists
+        if (pingTestButton != null)
+        {
+            pingTestButton.onClick.AddListener(PingTest);
+        }
         
         // Select default character
         selectedCharacterIndex = Mathf.Clamp(defaultCharacterIndex, 0, characterPrefabs.Length - 1);
@@ -514,6 +524,124 @@ public class NetworkManagerUI : MonoBehaviour
         response.Approved = true;
     }
     
+    public void PingTest()
+    {
+        if (ipInputField == null || string.IsNullOrEmpty(ipInputField.text))
+        {
+            UpdateStatusText("Enter an IP address first");
+            return;
+        }
+        
+        string ipAddress = ipInputField.text.Trim();
+        UpdateStatusText($"Testing connection to {ipAddress}...");
+        
+        StartCoroutine(RunNetworkDiagnostics(ipAddress));
+    }
+    
+    private IEnumerator RunNetworkDiagnostics(string ipAddress)
+    {
+        Debug.Log("Running network diagnostics...");
+        
+        // Test if we can ping the host (ICMP)
+        UpdateStatusText($"Pinging {ipAddress}...");
+        bool pingSuccess = false;
+        
+        try
+        {
+            Ping ping = new Ping(ipAddress);
+            float startTime = Time.time;
+            float timeout = 5f;
+            
+            while (!ping.isDone && Time.time - startTime < timeout)
+            {
+                yield return new WaitForSeconds(0.1f);
+            }
+            
+            if (ping.isDone && ping.time >= 0)
+            {
+                pingSuccess = true;
+                Debug.Log($"Ping successful! Response time: {ping.time}ms");
+                UpdateStatusText($"Ping successful ({ping.time}ms)");
+            }
+            else
+            {
+                Debug.LogWarning("Ping failed or timed out");
+                UpdateStatusText("Ping failed - host may be unreachable");
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError($"Error during ping: {ex.Message}");
+            UpdateStatusText("Ping error - check IP address");
+        }
+        
+        yield return new WaitForSeconds(1f);
+        
+        // Test UDP connectivity
+        UpdateStatusText("Testing UDP connectivity...");
+        
+        try
+        {
+            using (var udpClient = new UdpClient())
+            {
+                udpClient.Client.ReceiveTimeout = 5000; // 5 seconds timeout
+                
+                // Try to connect to the server
+                udpClient.Connect(ipAddress, udpTestPort);
+                
+                // Send a test packet
+                byte[] sendBytes = System.Text.Encoding.ASCII.GetBytes("UDPTest");
+                udpClient.Send(sendBytes, sendBytes.Length);
+                
+                Debug.Log($"UDP test packet sent to {ipAddress}:{udpTestPort}");
+                UpdateStatusText("UDP test packet sent. Waiting for response...");
+                
+                try
+                {
+                    // Try to receive a response
+                    IPEndPoint remoteEndPoint = new IPEndPoint(IPAddress.Any, 0);
+                    byte[] receiveBytes = udpClient.Receive(ref remoteEndPoint);
+                    string returnData = System.Text.Encoding.ASCII.GetString(receiveBytes);
+                    
+                    Debug.Log($"UDP test successful! Response: {returnData}");
+                    UpdateStatusText("UDP test successful - connection is possible!");
+                }
+                catch (SocketException ex)
+                {
+                    Debug.LogWarning($"UDP receive failed: {ex.Message}");
+                    UpdateStatusText("UDP test failed - port may be blocked");
+                    
+                    // Additional information about the error
+                    if (ex.SocketErrorCode == SocketError.TimedOut)
+                    {
+                        Debug.LogWarning("UDP timeout - no response received");
+                        // If ping succeeded but UDP failed, likely a port forwarding issue
+                        if (pingSuccess)
+                        {
+                            UpdateStatusText("Host reachable but port 7777 is blocked or not forwarded");
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError($"Error during UDP test: {ex.Message}");
+            UpdateStatusText("UDP test error - network may be restricted");
+        }
+        
+        // Final assessment
+        yield return new WaitForSeconds(1f);
+        if (!pingSuccess)
+        {
+            UpdateStatusText("Host IP is unreachable. Check the IP address or internet connection.");
+        }
+        else
+        {
+            UpdateStatusText("Host is reachable, but port 7777 may be blocked. Check port forwarding on host router.");
+        }
+    }
+    
     public void OnClientButtonClicked()
     {
         if (NetworkManager.Singleton == null)
@@ -548,11 +676,14 @@ public class NetworkManagerUI : MonoBehaviour
         transport.ConnectionData.Address = ipAddress;
         transport.ConnectionData.Port = defaultPort;
         
-        // Make connection more reliable
-        transport.MaxConnectAttempts = 3;
-        transport.ConnectTimeoutMS = 10000; // 10 seconds
+        // Make connection more reliable - increase timeouts and attempts
+        transport.MaxConnectAttempts = 5;         // Increased from 3 to 5 attempts
+        transport.ConnectTimeoutMS = 15000;       // Increased from 10s to 15s
+        transport.MaximumFragmentedMessageSize = 16384; // Increase fragment size
+        transport.HeartbeatTimeoutMS = 30000;     // Increased heartbeat timeout
         
         Debug.Log($"Transport configured - Address: {transport.ConnectionData.Address}, Port: {transport.ConnectionData.Port}");
+        Debug.Log($"Connection settings: MaxAttempts={transport.MaxConnectAttempts}, Timeout={transport.ConnectTimeoutMS}ms");
         
         // Ensure NetworkConfig is properly set up
         if (NetworkManager.Singleton.NetworkConfig == null)
@@ -670,6 +801,9 @@ public class NetworkManagerUI : MonoBehaviour
     {
         if (NetworkManager.Singleton != null)
         {
+            // Show host information
+            ShowHostInfo();
+            
             shouldShowLobby = true;
             
             var transport = NetworkManager.Singleton.GetComponent<UnityTransport>();
@@ -683,15 +817,26 @@ public class NetworkManagerUI : MonoBehaviour
             transport.ConnectionData.Address = "0.0.0.0";
             transport.ConnectionData.Port = defaultPort;
             
-            // Make connection more reliable
-            transport.MaxConnectAttempts = 3;
-            transport.ConnectTimeoutMS = 10000; // 10 seconds
+            // Make connection more reliable - increase timeouts and attempts
+            transport.MaxConnectAttempts = 5;         // Increased from 3 to 5 attempts
+            transport.ConnectTimeoutMS = 15000;       // Increased from 10s to 15s
+            transport.MaximumFragmentedMessageSize = 16384; // Increase fragment size
+            transport.HeartbeatTimeoutMS = 30000;     // Increased heartbeat timeout
             
             Debug.Log($"Host binding to all interfaces (0.0.0.0) on port {defaultPort}");
+            Debug.Log($"Connection settings: MaxAttempts={transport.MaxConnectAttempts}, Timeout={transport.ConnectTimeoutMS}ms");
             
             // Show the IP address that others should use to connect
             string publicIP = GetLocalIPAddress();
-            UpdateStatusText($"Starting host... Others can connect to: {publicIP}");
+            UpdateStatusText($"Starting host... Others can connect to: {publicIP} on port {defaultPort}");
+            
+            // Display port forwarding instructions in the console
+            Debug.Log($"======================== IMPORTANT ========================");
+            Debug.Log($"FOR FRIENDS TO CONNECT OVER THE INTERNET:");
+            Debug.Log($"1. Your public IP is: {publicIP}");
+            Debug.Log($"2. You MUST forward port {defaultPort} (UDP) to your PC's local IP in your router");
+            Debug.Log($"3. Visit https://portforward.com/ for instructions for your router model");
+            Debug.Log($"==========================================================");
             
             // Ensure NetworkConfig is properly set up
             if (NetworkManager.Singleton.NetworkConfig == null)
@@ -715,9 +860,6 @@ public class NetworkManagerUI : MonoBehaviour
                 Debug.Log("Host started successfully");
                 LogRegisteredPrefabs();
                 StartCoroutine(FadeOutUI());
-                
-                // Display a message about port forwarding
-                Debug.Log("IMPORTANT: Make sure port 7777 is forwarded in your router to allow external connections");
             }
             catch (Exception ex)
             {
@@ -778,5 +920,51 @@ public class NetworkManagerUI : MonoBehaviour
     {
         Debug.LogError("Transport failure occurred. Check your network settings and port forwarding.");
         UpdateStatusText("Connection failed: Transport error. Check your network settings.");
+    }
+
+    // Helper method to get the local LAN IP (for port forwarding setup)
+    public static string GetLocalLANIP()
+    {
+        try
+        {
+            var host = Dns.GetHostEntry(Dns.GetHostName());
+            foreach (var ip in host.AddressList)
+            {
+                if (ip.AddressFamily == AddressFamily.InterNetwork)
+                {
+                    Debug.Log($"Local LAN IP: {ip}");
+                    return ip.ToString();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError($"Error getting local IP: {ex.Message}");
+        }
+        return "127.0.0.1";
+    }
+    
+    // Show detailed host information for port forwarding
+    public void ShowHostInfo()
+    {
+        string publicIP = GetLocalIPAddress();
+        string localIP = GetLocalLANIP();
+        
+        string message = 
+            $"YOUR HOST INFO:\n" +
+            $"Public IP: {publicIP}\n" +
+            $"Local IP: {localIP}\n" +
+            $"Port: {defaultPort} (UDP)\n\n" +
+            $"FORWARD PORT {defaultPort} TO {localIP} IN YOUR ROUTER";
+            
+        UpdateStatusText(message);
+        
+        Debug.Log($"======================== PORT FORWARDING INSTRUCTIONS ========================");
+        Debug.Log($"1. Access your router admin page (typically http://192.168.1.1 or http://192.168.0.1)");
+        Debug.Log($"2. Find 'Port Forwarding' section (might be under 'Advanced Settings')");
+        Debug.Log($"3. Add a new rule to forward UDP port {defaultPort} to your local IP: {localIP}");
+        Debug.Log($"4. Save settings and restart router if necessary");
+        Debug.Log($"5. Test connection using an online port checker");
+        Debug.Log($"==========================================================================");
     }
 } 
