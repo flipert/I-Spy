@@ -1,6 +1,8 @@
 using UnityEngine;
 using Unity.Netcode;
 using System.Collections;
+using System.Collections.Generic;
+
 public class NPCSpawner : MonoBehaviour
 {
 [Header("Spawner Settings")]
@@ -12,6 +14,10 @@ public int maxNPCCount = 10;
 public Vector3 spawnAreaCenter = Vector3.zero;
 [Tooltip("Size (width, height, depth) of the spawn area.")]
 public Vector3 spawnAreaSize = new Vector3(20f, 0, 20f);
+
+// List to track spawned NPCs
+private List<NetworkObject> spawnedNPCs = new List<NetworkObject>();
+
 private IEnumerator Start()
 {
 Debug.Log("NPCSpawner: Start() called.");
@@ -32,6 +38,10 @@ Debug.Log("NPCSpawner: NetworkManager is now listening. (Running as server/host)
 Debug.Log("NPCSpawner: Waiting for the player to spawn...");
 yield return new WaitUntil(() => GameObject.FindWithTag("Player") != null);
 Debug.Log("NPCSpawner: Player found. Proceeding with NPC spawn.");
+
+// Register for client connection events to handle late joiners
+NetworkManager.Singleton.OnClientConnectedCallback += OnClientConnected;
+
 if (npcPrefabs == null || npcPrefabs.Length == 0)
 {
 Debug.LogError("NPCSpawner: No NPC prefabs are assigned!");
@@ -66,10 +76,36 @@ if (netObj == null)
 Debug.LogError("NPCSpawner: The instantiated NPC does not have a NetworkObject component!");
 continue;
 }
-netObj.Spawn();
+
+// Spawn with server ownership
+netObj.SpawnWithOwnership(NetworkManager.Singleton.ServerClientId, true);
+spawnedNPCs.Add(netObj); // Track this spawned NPC
 Debug.Log("NPCSpawner: Successfully spawned NPC " + (i+1));
 }
 Debug.Log("NPCSpawner: Finished spawning NPCs.");
+}
+
+// Handle late-joining clients
+private void OnClientConnected(ulong clientId)
+{
+    // Skip if it's the server/host client
+    if (clientId == NetworkManager.Singleton.ServerClientId)
+        return;
+        
+    Debug.Log($"NPCSpawner: New client connected (ID: {clientId}). Ensuring all NPCs are visible.");
+    
+    // We don't need to do anything special here as NetworkObjects should be 
+    // automatically synchronized to new clients, but we can log for debugging
+    Debug.Log($"NPCSpawner: Client {clientId} should see {spawnedNPCs.Count} NPCs");
+}
+
+private void OnDestroy()
+{
+    // Clean up callback when this object is destroyed
+    if (NetworkManager.Singleton != null)
+    {
+        NetworkManager.Singleton.OnClientConnectedCallback -= OnClientConnected;
+    }
 }
 
 // Returns a random NPC prefab from the array
