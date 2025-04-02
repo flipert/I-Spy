@@ -183,7 +183,14 @@ public class CameraFollow : MonoBehaviour
             else
             {
                 Debug.LogWarning("CameraFollow: No GameObject with tag 'Player' found in Update.");
+                return; // Exit early if no target is found
             }
+        }
+
+        // Only proceed if we have a valid target
+        if (target == null)
+        {
+            return; // Skip camera movement if target is null
         }
 
         // Continue with camera movement logic
@@ -209,7 +216,7 @@ public class CameraFollow : MonoBehaviour
         }
 
         // Make the camera look at the target if enabled
-        if (lookAtTarget)
+        if (lookAtTarget && target != null)
         {
             if (rotationDamping > 0)
             {
@@ -230,12 +237,16 @@ public class CameraFollow : MonoBehaviour
     
     private void UpdateCameraPosition(float speed)
     {
+        if (target == null) return;
+        
         Vector3 targetPosition = GetTargetPosition();
         transform.position = Vector3.Lerp(transform.position, targetPosition, speed * Time.deltaTime * 10f);
     }
     
     private Vector3 GetTargetPosition()
     {
+        if (target == null) return transform.position; // Return current position if target is null
+        
         Vector3 targetPos = target.position + offset;
         
         // Maintain fixed height if enabled

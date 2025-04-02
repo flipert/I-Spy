@@ -3286,8 +3286,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   npcPrefabs:
-  - {fileID: 5964388756769884995, guid: 62f65b684cf684c3783a308e8214fd27, type: 3}
   - {fileID: 5964388756769884995, guid: b9ee9f2a37fbd4d6887071452b1beedf, type: 3}
+  - {fileID: 5964388756769884995, guid: 62f65b684cf684c3783a308e8214fd27, type: 3}
   maxNPCCount: 150
   spawnAreaCenter: {x: 0, y: 0, z: 0}
   spawnAreaSize: {x: 20, y: 0, z: 20}
