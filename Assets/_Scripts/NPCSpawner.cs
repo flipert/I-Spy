@@ -78,7 +78,7 @@ continue;
 }
 
 // Spawn with server ownership
-netObj.SpawnWithOwnership(NetworkManager.Singleton.ServerClientId, true);
+netObj.SpawnWithOwnership(NetworkManager.ServerClientId, true);
 spawnedNPCs.Add(netObj); // Track this spawned NPC
 Debug.Log("NPCSpawner: Successfully spawned NPC " + (i+1));
 }
@@ -89,7 +89,7 @@ Debug.Log("NPCSpawner: Finished spawning NPCs.");
 private void OnClientConnected(ulong clientId)
 {
     // Skip if it's the server/host client
-    if (clientId == NetworkManager.Singleton.ServerClientId)
+    if (clientId == NetworkManager.ServerClientId)
         return;
         
     Debug.Log($"NPCSpawner: New client connected (ID: {clientId}). Ensuring all NPCs are visible.");
