@@ -7,6 +7,13 @@ TagManager:
   - Building
   - Boundary
   - NPC
+  - StaminaBarFill
+  - TargetProfileImage
+  - TargetLoadingIndicator
+  - PursuerSlot1
+  - PursuerSlot2
+  - PursuerSlot3
+  - PursuerSlot4
   layers:
   - Default
   - TransparentFX

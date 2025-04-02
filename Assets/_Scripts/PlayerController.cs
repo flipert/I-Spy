@@ -12,12 +12,20 @@ public class PlayerController : NetworkBehaviour
     public float staminaDepletionRate = 15f; // How fast stamina goes down when sprinting
     public float staminaRegenRate = 5f;     // How fast stamina refills when not sprinting
     public float minStaminaToSprint = 20f;  // Minimum stamina needed to START sprinting again
-    public RectTransform staminaBarFill;    // Assign your StaminaBar (the white fill) here
+    private RectTransform staminaBarFill;    // Keep it private
 
     // Network variables to sync across clients
     private NetworkVariable<Vector3> networkPosition = new NetworkVariable<Vector3>();
     private NetworkVariable<bool> networkIsRunning = new NetworkVariable<bool>(false);
     private NetworkVariable<bool> networkIsFacingLeft = new NetworkVariable<bool>(false);
+
+    // New network variables for targeting system
+    private NetworkVariable<ulong> currentTargetId = new NetworkVariable<ulong>(ulong.MaxValue); // ulong.MaxValue means "no target"
+    // NetworkList must be initialized in the declaration for Netcode
+    private NetworkList<ulong> pursuersIds = new NetworkList<ulong>();
+
+    // Reference to the HUD controller
+    private PlayerHUDController hudController;
 
     private float currentStamina;
     private bool canSprint = true;          // Track if player can start sprinting
@@ -27,6 +35,9 @@ public class PlayerController : NetworkBehaviour
     private bool isMoving = false;
     private bool isFacingLeft = false;
     private bool isRunning = false;
+
+    // This could be used to identify which character type this player is
+    public int characterIndex { get; private set; } = 0;
 
     void Start()
     {
@@ -51,8 +62,8 @@ public class PlayerController : NetworkBehaviour
             Debug.LogError("Child 'Character' not found. Please ensure your player has a child named 'Character' with a SpriteRenderer.");
         }
 
-        // Make sure stamina bar is full at start
-        UpdateStaminaBar();
+        // Make sure stamina bar is full at start - Will be updated in OnNetworkSpawn for local player
+        // UpdateStaminaBar(); // Moved to OnNetworkSpawn
         
         // Debug log for network ownership
         Debug.Log($"Player initialized. IsOwner: {IsOwner}, NetworkObjectId: {NetworkObjectId}");
@@ -174,6 +185,7 @@ public class PlayerController : NetworkBehaviour
     /// </summary>
     private void UpdateStaminaBar()
     {
+        // Add a null check here too, just in case it wasn't found during spawn
         if (staminaBarFill == null) return;
 
         float ratio = currentStamina / maxStamina;
@@ -191,7 +203,13 @@ public class PlayerController : NetworkBehaviour
     {
         base.OnNetworkSpawn();
         
-        // If this is the local player, find the camera and assign ourselves as the target
+        // No need to initialize NetworkList here anymore
+        // if (pursuersIds == null)
+        // {
+        //     pursuersIds = new NetworkList<ulong>();
+        // }
+
+        // If this is the local player, find the camera and assign ourselves as the target AND find the HUD elements
         if (IsOwner)
         {
             Debug.Log($"PlayerController: Local player spawned at {transform.position}");
@@ -208,12 +226,244 @@ public class PlayerController : NetworkBehaviour
             {
                 Debug.LogWarning("PlayerController: Could not find CameraFollow component on main camera");
             }
+
+            // Find the stamina bar UI element in the scene using its tag
+            GameObject staminaBarObject = GameObject.FindGameObjectWithTag("StaminaBarFill"); // Make sure this tag exists and is assigned in the scene
+            if (staminaBarObject != null)
+            {
+                staminaBarFill = staminaBarObject.GetComponent<RectTransform>();
+                if (staminaBarFill != null)
+                {
+                    Debug.Log("PlayerController: Found and assigned StaminaBarFill RectTransform.");
+                    // Initialize the bar state correctly now that we found it
+                    UpdateStaminaBar();
+                }
+                else
+                {
+                    Debug.LogError("PlayerController: Found GameObject with tag 'StaminaBarFill', but it lacks a RectTransform component.");
+                }
+            }
+            else
+            {
+                Debug.LogWarning("PlayerController: Could not find GameObject with tag 'StaminaBarFill'. Make sure the UI element exists in the scene and has the correct tag.");
+            }
+
+            // Find and setup the HUD controller
+            hudController = FindObjectOfType<PlayerHUDController>();
+            if (hudController == null)
+            {
+                Debug.LogError("PlayerController: Could not find PlayerHUDController in the scene!");
+            }
+            else
+            {
+                hudController.Initialize();
+            }
         }
-        
+
+        // If this is the server, register this player with the GameManager
+        if (IsServer)
+        {
+            // Get the character index from NetworkManagerUI if available
+            if (NetworkManagerUI.Instance != null)
+            {
+                characterIndex = NetworkManagerUI.Instance.GetClientCharacterIndex(OwnerClientId);
+            }
+
+            // Register with GameManager
+            if (GameManager.Instance != null)
+            {
+                GameManager.Instance.RegisterPlayer(this);
+            }
+            else
+            {
+                Debug.LogError("PlayerController: GameManager.Instance is null! Make sure a GameManager exists in the scene.");
+            }
+        }
+
+        // Subscribe to network variable changes
+        currentTargetId.OnValueChanged += OnTargetChanged;
+        // Fix: Subscribe to NetworkList events directly
+        pursuersIds.OnListChanged += OnPursuersChanged;
+
         // Initialize network variables
         if (IsServer)
         {
             networkPosition.Value = transform.position;
         }
     }
+
+    public override void OnNetworkDespawn()
+    {
+        base.OnNetworkDespawn();
+
+        // Add null checks before unsubscribing
+        if (currentTargetId != null)
+        {
+            currentTargetId.OnValueChanged -= OnTargetChanged;
+        }
+        
+        if (pursuersIds != null)
+        {
+            pursuersIds.OnListChanged -= OnPursuersChanged;
+        }
+
+        // Clean up other callbacks or references as needed
+    }
+
+    // Called on all clients when the current target changes
+    private void OnTargetChanged(ulong previousTarget, ulong newTarget)
+    {
+        if (!IsOwner) return; // Only update UI for the local player
+
+        Debug.Log($"PlayerController: Target changed from {previousTarget} to {newTarget}");
+
+        if (hudController != null)
+        {
+            if (newTarget == ulong.MaxValue)
+            {
+                // No target assigned
+                hudController.SetTargetLoadingState(false, false);
+            }
+            else
+            {
+                // New target assigned, show loading indicator while finding target details
+                hudController.SetTargetLoadingState(true, true);
+
+                // Get the character index of the target player
+                // This might need to be implemented differently based on your architecture
+                PlayerController targetPlayer = GetPlayerByNetworkId(newTarget);
+                if (targetPlayer != null)
+                {
+                    int targetCharacterIndex = targetPlayer.characterIndex;
+                    hudController.SetTargetCharacter(targetCharacterIndex);
+                }
+                else
+                {
+                    // If we can't find the player yet, we'll keep showing the loading state
+                    // The UI might be updated later when we have more info
+                }
+            }
+        }
+    }
+
+    // Called on all clients when the list of pursuers changes
+    private void OnPursuersChanged(NetworkListEvent<ulong> changeEvent)
+    {
+        if (!IsOwner) return; // Only update UI for the local player
+
+        Debug.Log($"PlayerController: Pursuers list changed");
+
+        if (hudController != null)
+        {
+            // Convert NetworkList to array for the HUD controller
+            ulong[] pursuers = new ulong[pursuersIds.Count];
+            for (int i = 0; i < pursuersIds.Count; i++)
+            {
+                pursuers[i] = pursuersIds[i];
+            }
+            hudController.UpdatePursuers(pursuers);
+        }
+    }
+
+    // Helper method to find a player by their network ID
+    private PlayerController GetPlayerByNetworkId(ulong networkId)
+    {
+        // This is a simple implementation; you may need to adjust based on your game's structure
+        PlayerController[] allPlayers = FindObjectsOfType<PlayerController>();
+        foreach (PlayerController player in allPlayers)
+        {
+            if (player.OwnerClientId == networkId)
+            {
+                return player;
+            }
+        }
+        return null;
+    }
+
+    #region ClientRpc Methods (Called by Server)
+
+    // Called on all clients to update a player's target
+    [ClientRpc]
+    public void SetTargetClientRpc(ulong targetId)
+    {
+        if (IsServer) 
+        {
+            // If we're the server, directly update the network variable
+            currentTargetId.Value = targetId;
+        }
+        else
+        {
+            // This will fire the OnTargetChanged callback
+            Debug.Log($"PlayerController: Received SetTargetClientRpc with target ID {targetId}");
+            // For non-server clients, we don't need to do anything as they'll receive the networkvar change
+        }
+    }
+
+    // Called on all clients to update the pursuers list
+    [ClientRpc]
+    public void UpdatePursuersClientRpc(ulong[] newPursuers)
+    {
+        // NetworkList is now always initialized in the field declaration
+        // if (pursuersIds == null)
+        // {
+        //    pursuersIds = new NetworkList<ulong>();
+        // }
+
+        // Update pursuers list
+        pursuersIds.Clear();
+        foreach (ulong pursuerId in newPursuers)
+        {
+            pursuersIds.Add(pursuerId);
+        }
+        
+        Debug.Log($"PlayerController: Received UpdatePursuersClientRpc with {newPursuers.Length} pursuers");
+    }
+
+    #endregion
+
+    #region Gameplay Methods
+
+    // Call this method when this player kills another player
+    public void KillTarget(PlayerController target)
+    {
+        if (!IsServer)
+        {
+            // If not server, send RPC to server
+            KillTargetServerRpc(target.OwnerClientId);
+            return;
+        }
+
+        if (target.OwnerClientId == currentTargetId.Value)
+        {
+            // Inform GameManager about the kill
+            if (GameManager.Instance != null)
+            {
+                GameManager.Instance.PlayerKilledTarget(OwnerClientId, target.OwnerClientId);
+            }
+            
+            // Additional kill logic can go here (e.g., score, effects, etc.)
+        }
+        else
+        {
+            Debug.LogWarning($"PlayerController: Player {OwnerClientId} tried to kill {target.OwnerClientId} who is not their current target!");
+        }
+    }
+
+    // Server RPC for non-server client to request a kill
+    [ServerRpc]
+    private void KillTargetServerRpc(ulong targetId)
+    {
+        // Validate the kill request
+        if (targetId == currentTargetId.Value)
+        {
+            // Find the target player
+            PlayerController targetPlayer = GetPlayerByNetworkId(targetId);
+            if (targetPlayer != null)
+            {
+                KillTarget(targetPlayer);
+            }
+        }
+    }
+
+    #endregion
 }
