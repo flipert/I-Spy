@@ -39,8 +39,8 @@ public class NetworkManagerUI : MonoBehaviour
     // Track the selected character
     private int selectedCharacterIndex;
     
-    // Static getter to allow PlayerSpawner to access the selected character prefab
-    public static GameObject SelectedCharacterPrefab { get; private set; }
+    // Store character selections per client ID (server-side)
+    private Dictionary<ulong, int> clientCharacterSelections = new Dictionary<ulong, int>();
     
     // Add getter for character prefabs array for debugging and UI purposes
     /// <summary>
@@ -67,7 +67,7 @@ public class NetworkManagerUI : MonoBehaviour
         if (characterPrefabs != null && characterPrefabs.Length > 0 && 
             selectedCharacterIndex >= 0 && selectedCharacterIndex < characterPrefabs.Length)
         {
-            SelectedCharacterPrefab = characterPrefabs[selectedCharacterIndex];
+            // SelectedCharacterPrefab = characterPrefabs[selectedCharacterIndex]; // REMOVED - We don't need a single static prefab anymore
         }
         
         // Setup character selection buttons
@@ -156,8 +156,8 @@ public class NetworkManagerUI : MonoBehaviour
         if (characterIndex >= 0 && characterIndex < characterPrefabs.Length)
         {
             selectedCharacterIndex = characterIndex;
-            SelectedCharacterPrefab = characterPrefabs[characterIndex];
-            Debug.Log($"Selected character: {SelectedCharacterPrefab.name}");
+            // SelectedCharacterPrefab = characterPrefabs[characterIndex]; // REMOVED - Selection is stored locally until connection
+            Debug.Log($"Selected character index: {selectedCharacterIndex}");
             
             // Highlight the selected button (optional)
             UpdateCharacterSelectionUI();
@@ -221,7 +221,16 @@ public class NetworkManagerUI : MonoBehaviour
             NetworkManager.Singleton.ConnectionApprovalCallback -= ApproveConnection;
             NetworkManager.Singleton.ConnectionApprovalCallback += ApproveConnection;
             
+            // Store host's selection directly
+            clientCharacterSelections[NetworkManager.ServerClientId] = selectedCharacterIndex;
+            Debug.Log($"Host selected character index: {selectedCharacterIndex}");
+            
             NetworkManager.Singleton.StartHost();
+            
+            // Set the connection data with the selected character index
+            byte[] payload = System.BitConverter.GetBytes(selectedCharacterIndex);
+            NetworkManager.Singleton.NetworkConfig.ConnectionData = payload;
+            Debug.Log($"Setting connection data with character index: {selectedCharacterIndex}");
             
             // Fade out the UI
             StartCoroutine(FadeOutUI());
@@ -253,6 +262,11 @@ public class NetworkManagerUI : MonoBehaviour
         // Set the connection data
         NetworkManager.Singleton.GetComponent<Unity.Netcode.Transports.UTP.UnityTransport>().ConnectionData.Address = ipAddress;
         NetworkManager.Singleton.GetComponent<Unity.Netcode.Transports.UTP.UnityTransport>().ConnectionData.Port = defaultPort;
+        
+        // Set the connection data with the selected character index
+        byte[] payload = System.BitConverter.GetBytes(selectedCharacterIndex);
+        NetworkManager.Singleton.NetworkConfig.ConnectionData = payload;
+        Debug.Log($"Setting connection data with character index: {selectedCharacterIndex}");
         
         // Start as client
         Debug.Log("Starting client - NO player spawning until Game scene loads");
@@ -435,10 +449,42 @@ public class NetworkManagerUI : MonoBehaviour
         UpdateStatusText("Your IP: " + localIP);
     }
     
+    // Provide a way for PlayerSpawner to get the index
+    public int GetClientCharacterIndex(ulong clientId)
+    {
+        if (clientCharacterSelections.TryGetValue(clientId, out int index))
+        {
+            return index;
+        }
+        // Return default if not found (shouldn't happen often with approval logic)
+        Debug.LogWarning($"No character selection found for client {clientId}. Returning default index {defaultCharacterIndex}.");
+        return defaultCharacterIndex;
+    }
+    
     // Connection approval callback - this controls when players can join
     private void ApproveConnection(NetworkManager.ConnectionApprovalRequest request, NetworkManager.ConnectionApprovalResponse response)
     {
         Debug.Log($"Connection approval requested for client ID: {request.ClientNetworkId}");
+        
+        int characterIndex = defaultCharacterIndex;
+        // Receive character selection from payload
+        if (request.Payload != null && request.Payload.Length == sizeof(int))
+        {
+            characterIndex = System.BitConverter.ToInt32(request.Payload, 0);
+            if (characterIndex < 0 || characterIndex >= characterPrefabs.Length)
+            {
+                Debug.LogWarning($"Received invalid character index {characterIndex} from client {request.ClientNetworkId}. Using default {defaultCharacterIndex}.");
+                characterIndex = defaultCharacterIndex;
+            }
+        }
+        else
+        {
+            Debug.LogWarning($"Client {request.ClientNetworkId} connected without valid character selection payload. Using default {defaultCharacterIndex}. Payload Length: {(request.Payload?.Length ?? -1)}");
+        }
+        
+        // Store the selection for this client
+        clientCharacterSelections[request.ClientNetworkId] = characterIndex;
+        Debug.Log($"Stored character index {characterIndex} for client {request.ClientNetworkId}");
         
         // Always approve the connection
         response.Approved = true;

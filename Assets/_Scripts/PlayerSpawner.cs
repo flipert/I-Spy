@@ -131,10 +131,28 @@ public class PlayerSpawner : MonoBehaviour
         Vector3 spawnPosition = spawnPoint != null ? spawnPoint.position : Vector3.zero;
         Quaternion spawnRotation = spawnPoint != null ? spawnPoint.rotation : Quaternion.identity;
         
-        // Get the selected character prefab from NetworkManagerUI
-        GameObject characterPrefab = NetworkManagerUI.SelectedCharacterPrefab;
+        // Get the selected character prefab from NetworkManagerUI based on ClientID
+        GameObject characterPrefab = null;
+        if (NetworkManagerUI.Instance != null)
+        {
+            int characterIndex = NetworkManagerUI.Instance.GetClientCharacterIndex(clientId);
+            GameObject[] availablePrefabs = NetworkManagerUI.Instance.CharacterPrefabs;
+            
+            if (availablePrefabs != null && characterIndex >= 0 && characterIndex < availablePrefabs.Length)
+            {
+                characterPrefab = availablePrefabs[characterIndex];
+            }
+            else
+            {
+                 Debug.LogWarning($"PlayerSpawner: Invalid character index ({characterIndex}) or no prefabs available for client {clientId}. Using fallback.");
+            }
+        }
+        else
+        {
+            Debug.LogError("PlayerSpawner: NetworkManagerUI.Instance is null! Cannot get character selection.");
+        }
         
-        // Fallback to default prefab if no selection
+        // Fallback to default prefab if no selection or error occurred
         if (characterPrefab == null)
         {
             Debug.LogWarning("PlayerSpawner: No character prefab selected, using fallback");
