@@ -9,6 +9,8 @@ using UnityEngine.UI; // Required for Button
 using Unity.Netcode;
 using Unity.Services.Relay;
 using Unity.Services.Relay.Models;
+using System.Linq; // Add this for Select extension method
+using TMPro;
 
 public class LobbyManager : MonoBehaviour
 {
@@ -30,6 +32,10 @@ public class LobbyManager : MonoBehaviour
     [Header("Lobby Settings")]
     [SerializeField] private string lobbyNameInput = "MyLobby";
     [SerializeField] private int maxPlayersInput = 4;
+
+    [Header("Lobby UI")]
+    [SerializeField] private Transform playerListContent; // Parent transform for player entries
+    [SerializeField] private GameObject playerEntryPrefab; // Prefab for each player in the list
 
     private Lobby hostLobby;
     private Lobby joinedLobby; // Added to track joined lobby
@@ -194,11 +200,12 @@ public class LobbyManager : MonoBehaviour
         if (mainMenuPanel) mainMenuPanel.SetActive(false);
         if (lobbyPanel) lobbyPanel.SetActive(true);
 
-        // Update UI elements
-        if (lobbyCodeText && joinedLobby != null)
+        if (lobbyCodeText != null && joinedLobby != null)
         {
             lobbyCodeText.text = $"Lobby Code: {joinedLobby.LobbyCode}";
         }
+
+        UpdatePlayerList();
 
         // Only host can start the game
         if (startGameButton)
@@ -218,8 +225,46 @@ public class LobbyManager : MonoBehaviour
                ShowMainMenuUI(); 
            });
         }
+    }
 
-        // Add logic to update player list UI here later...
+    private void UpdatePlayerList()
+    {
+        if (playerListContent == null || playerEntryPrefab == null || joinedLobby == null)
+        {
+            return;
+        }
+
+        // Clear existing player entries
+        foreach (Transform child in playerListContent)
+        {
+            Destroy(child.gameObject);
+        }
+
+        // Create new entries for each player
+        foreach (var player in joinedLobby.Players)
+        {
+            GameObject playerEntry = Instantiate(playerEntryPrefab, playerListContent);
+            PlayerEntryUI entryUI = playerEntry.GetComponent<PlayerEntryUI>();
+            
+            if (entryUI != null)
+            {
+                // Get player name from player data or use a default
+                string playerName = "Player";
+                if (player.Data != null && player.Data.ContainsKey("PlayerName"))
+                {
+                    playerName = player.Data["PlayerName"].Value;
+                }
+
+                // Check if player is ready
+                bool isReady = false;
+                if (player.Data != null && player.Data.ContainsKey("IsReady"))
+                {
+                    bool.TryParse(player.Data["IsReady"].Value, out isReady);
+                }
+
+                entryUI.Initialize(playerName, isReady);
+            }
+        }
     }
 
     private bool IsLobbyHost() 

@@ -156,9 +156,9 @@ RectTransform:
   - {fileID: 732935832}
   m_Father: {fileID: 2074981133}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
-  m_AnchorMin: {x: 0, y: 1}
-  m_AnchorMax: {x: 0, y: 1}
-  m_AnchoredPosition: {x: 685.0048, y: -60.205}
+  m_AnchorMin: {x: 0, y: 0}
+  m_AnchorMax: {x: 0, y: 0}
+  m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 389.87036, y: 120.41861}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &71810923
@@ -419,24 +419,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 5e22f5e61368d4125959a4b8f4093761, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  hostButton: {fileID: 0}
-  clientButton: {fileID: 0}
-  ipInputField: {fileID: 0}
-  statusText: {fileID: 2123015878}
-  startupPanel: {fileID: 1240801667}
-  startupCanvasGroup: {fileID: 1240801669}
-  fadeOutDuration: 0.5
-  defaultIP: 2.122.204.31
-  defaultPort: 7777
-  gameSceneName: Game
-  sceneLoadDelay: 1
-  characterPrefabs:
-  - {fileID: 5964388756769884995, guid: 8323979c5d37e47d9867e3d8461d53c8, type: 3}
-  - {fileID: 5964388756769884995, guid: 821cb086e733f4acf97ea6b1444473cf, type: 3}
-  characterSelectionButtons:
-  - {fileID: 0}
-  - {fileID: 0}
-  defaultCharacterIndex: 0
 --- !u!114 &250193483
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1552,9 +1534,9 @@ RectTransform:
   - {fileID: 374014575}
   m_Father: {fileID: 2074981133}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
-  m_AnchorMin: {x: 0, y: 1}
-  m_AnchorMax: {x: 0, y: 1}
-  m_AnchoredPosition: {x: 245.03482, y: -60.205}
+  m_AnchorMin: {x: 0, y: 0}
+  m_AnchorMax: {x: 0, y: 0}
+  m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 389.87036, y: 120.41861}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &761307963
@@ -1662,7 +1644,7 @@ GameObject:
   - component: {fileID: 827624153}
   - component: {fileID: 827624154}
   m_Layer: 5
-  m_Name: Content
+  m_Name: PlayerListContent
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -1860,7 +1842,7 @@ GameObject:
   - component: {fileID: 945671273}
   - component: {fileID: 945671272}
   m_Layer: 5
-  m_Name: PlayerListPabnel
+  m_Name: PlayerListPanel
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -2106,7 +2088,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!224 &1118365672
 RectTransform:
   m_ObjectHideFlags: 0
@@ -2585,6 +2567,8 @@ MonoBehaviour:
   closeBrowserButton: {fileID: 140281190}
   lobbyNameInput: My Lobby
   maxPlayersInput: 6
+  playerListContent: {fileID: 827624153}
+  playerEntryPrefab: {fileID: 4379043631310735493, guid: 053bfdd76671a433488720d03a1fedb3, type: 3}
 --- !u!114 &1199279048
 MonoBehaviour:
   m_ObjectHideFlags: 0
