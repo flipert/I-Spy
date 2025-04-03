@@ -76,9 +76,8 @@ public class LobbyManager : MonoBehaviour
                     { 
                         "RelayCode", 
                         new DataObject(
-                            DataObject.VisibilityOptions.Member, 
-                            relayCode,
-                            DataObject.IndexOptions.S1
+                            DataObject.VisibilityOptions.Public,
+                            relayCode
                         ) 
                     }
                 }
@@ -411,6 +410,9 @@ public class LobbyManager : MonoBehaviour
                 return;
             }
 
+            Debug.Log($"Attempting to join lobby: {selectedLobby.Name}");
+            Debug.Log($"Lobby data keys: {string.Join(", ", selectedLobby.Data.Keys)}");
+
             if (selectedLobby.Data == null || !selectedLobby.Data.ContainsKey("RelayCode"))
             {
                 Debug.LogError("Lobby does not contain Relay code");
@@ -425,6 +427,8 @@ public class LobbyManager : MonoBehaviour
                 Debug.LogError("Relay code is null or empty");
                 return;
             }
+
+            Debug.Log($"Found Relay code: {relayCode}");
 
             // Join the Relay allocation
             bool relayJoined = await JoinRelay(relayCode);
