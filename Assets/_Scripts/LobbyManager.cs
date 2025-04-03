@@ -89,10 +89,27 @@ public class LobbyManager : MonoBehaviour
             hostLobby = lobby;
             joinedLobby = hostLobby;
 
-            Debug.Log($"Created Lobby with Relay! Name: {lobby.Name}, Code: {lobby.LobbyCode}, Relay Code: {relayCode}");
-            Debug.Log($"Lobby Data: {string.Join(", ", lobby.Data.Select(kvp => $"{kvp.Key}: {kvp.Value.Value}"))}");
+            // Log detailed information about the created lobby
+            Debug.Log($"Created Lobby Details:");
+            Debug.Log($"- Name: {lobby.Name}");
+            Debug.Log($"- ID: {lobby.Id}");
+            Debug.Log($"- Code: {lobby.LobbyCode}");
+            Debug.Log($"- Max Players: {lobby.MaxPlayers}");
+            Debug.Log($"- Host ID: {lobby.HostId}");
+            Debug.Log($"- Is Private: {lobby.IsPrivate}");
+            if (lobby.Data != null)
+            {
+                foreach (var data in lobby.Data)
+                {
+                    Debug.Log($"- Data: {data.Key} = {data.Value.Value}");
+                }
+            }
 
             ShowLobbyUI();
+
+            // Start the heartbeat
+            heartbeatTimer = 15f;
+            StartCoroutine(HeartbeatLobbyCoroutine(lobby.Id, 15f));
         }
         catch (LobbyServiceException e)
         {
@@ -378,30 +395,64 @@ public class LobbyManager : MonoBehaviour
 
             foreach (Lobby lobby in lobbies.Results)
             {
-                if (string.IsNullOrWhiteSpace(lobby.LobbyCode))
-                {
-                    Debug.LogWarning($"Skipping lobby {lobby.Id} because it has no lobby code");
-                    continue;
-                }
-
-                // Log each lobby's data for debugging
-                string lobbyInfo = $"Found Lobby - Name: {lobby.Name}, ID: {lobby.Id}, Code: {lobby.LobbyCode}";
+                // Log detailed information about each found lobby
+                string lobbyInfo = $"\nFound Lobby:";
+                lobbyInfo += $"\n- Name: {lobby.Name}";
+                lobbyInfo += $"\n- ID: {lobby.Id}";
+                lobbyInfo += $"\n- Code: {lobby.LobbyCode}";
+                lobbyInfo += $"\n- Players: {lobby.Players.Count}/{lobby.MaxPlayers}";
+                lobbyInfo += $"\n- Host ID: {lobby.HostId}";
+                
                 if (lobby.Data != null && lobby.Data.ContainsKey("RelayCode"))
                 {
-                    lobbyInfo += $", Relay Code: {lobby.Data["RelayCode"].Value}";
+                    lobbyInfo += $"\n- Relay Code: {lobby.Data["RelayCode"].Value}";
                 }
                 Debug.Log(lobbyInfo);
 
+                // Create lobby entry even if lobby code is missing
                 GameObject entryGO = Instantiate(lobbyEntryPrefab, lobbyListContent);
                 LobbyEntryUI entryUI = entryGO.GetComponent<LobbyEntryUI>();
                 if (entryUI != null)
                 {
-                    // Store the lobby code in a local variable to ensure it's captured correctly
-                    string lobbyCode = lobby.LobbyCode;
-                    Debug.Log($"Setting up join button for lobby code: {lobbyCode}");
                     entryUI.Initialize(lobby, async () => {
-                        Debug.Log($"Join button clicked for lobby code: {lobbyCode}");
-                        await JoinLobbyByCode(lobbyCode);
+                        // If lobby code is missing, try to join by ID instead
+                        if (string.IsNullOrWhiteSpace(lobby.LobbyCode))
+                        {
+                            Debug.Log($"Attempting to join lobby by ID: {lobby.Id}");
+                            try
+                            {
+                                JoinLobbyByIdOptions options = new JoinLobbyByIdOptions
+                                {
+                                    Player = GetPlayer()
+                                };
+                                joinedLobby = await LobbyService.Instance.JoinLobbyByIdAsync(lobby.Id, options);
+                                
+                                if (joinedLobby.Data != null && joinedLobby.Data.ContainsKey("RelayCode"))
+                                {
+                                    string relayCode = joinedLobby.Data["RelayCode"].Value;
+                                    Debug.Log($"Found Relay code in joined lobby: {relayCode}");
+                                    
+                                    bool relayJoined = await JoinRelay(relayCode);
+                                    if (!relayJoined)
+                                    {
+                                        Debug.LogError("Failed to join Relay after joining lobby by ID");
+                                        await LeaveLobby();
+                                        return;
+                                    }
+                                }
+                                
+                                ShowLobbyUI();
+                            }
+                            catch (LobbyServiceException e)
+                            {
+                                Debug.LogError($"Failed to join lobby by ID: {e}");
+                            }
+                        }
+                        else
+                        {
+                            Debug.Log($"Attempting to join lobby with code: {lobby.LobbyCode}");
+                            await JoinLobbyByCode(lobby.LobbyCode);
+                        }
                     });
                 }
             }
