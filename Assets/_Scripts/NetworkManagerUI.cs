@@ -461,6 +461,20 @@ public class NetworkManagerUI : MonoBehaviour
         return defaultCharacterIndex;
     }
     
+    // Add this new method to update character selections from lobby data
+    public void UpdateCharacterSelection(ulong clientId, int characterIndex)
+    {
+        if (characterIndex >= 0 && characterIndex < characterPrefabs.Length)
+        {
+            Debug.Log($"NetworkManagerUI: Updating character selection for client {clientId} to index {characterIndex}");
+            clientCharacterSelections[clientId] = characterIndex;
+        }
+        else
+        {
+            Debug.LogWarning($"NetworkManagerUI: Invalid character index {characterIndex} for client {clientId}");
+        }
+    }
+    
     // Connection approval callback - this controls when players can join
     private void ApproveConnection(NetworkManager.ConnectionApprovalRequest request, NetworkManager.ConnectionApprovalResponse response)
     {
