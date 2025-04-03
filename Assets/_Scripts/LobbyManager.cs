@@ -378,6 +378,12 @@ public class LobbyManager : MonoBehaviour
 
             foreach (Lobby lobby in lobbies.Results)
             {
+                if (string.IsNullOrWhiteSpace(lobby.LobbyCode))
+                {
+                    Debug.LogWarning($"Skipping lobby {lobby.Id} because it has no lobby code");
+                    continue;
+                }
+
                 // Log each lobby's data for debugging
                 string lobbyInfo = $"Found Lobby - Name: {lobby.Name}, ID: {lobby.Id}, Code: {lobby.LobbyCode}";
                 if (lobby.Data != null && lobby.Data.ContainsKey("RelayCode"))
@@ -390,7 +396,13 @@ public class LobbyManager : MonoBehaviour
                 LobbyEntryUI entryUI = entryGO.GetComponent<LobbyEntryUI>();
                 if (entryUI != null)
                 {
-                    entryUI.Initialize(lobby, async () => await JoinSelectedLobby(lobby));
+                    // Store the lobby code in a local variable to ensure it's captured correctly
+                    string lobbyCode = lobby.LobbyCode;
+                    Debug.Log($"Setting up join button for lobby code: {lobbyCode}");
+                    entryUI.Initialize(lobby, async () => {
+                        Debug.Log($"Join button clicked for lobby code: {lobbyCode}");
+                        await JoinLobbyByCode(lobbyCode);
+                    });
                 }
             }
         }
@@ -414,8 +426,16 @@ public class LobbyManager : MonoBehaviour
                 return;
             }
 
-            // Join by lobby code instead of ID for better consistency
-            await JoinLobbyByCode(selectedLobby.LobbyCode);
+            string lobbyCode = selectedLobby.LobbyCode;
+            Debug.Log($"Attempting to join lobby with code: {lobbyCode}");
+
+            if (string.IsNullOrWhiteSpace(lobbyCode))
+            {
+                Debug.LogError("Cannot join lobby: Lobby code is null or empty");
+                return;
+            }
+
+            await JoinLobbyByCode(lobbyCode);
         }
         catch (System.Exception e)
         {
@@ -595,6 +615,14 @@ public class LobbyManager : MonoBehaviour
     {
         try
         {
+            if (string.IsNullOrWhiteSpace(lobbyCode))
+            {
+                Debug.LogError("Cannot join lobby: Provided lobby code is null or empty");
+                return;
+            }
+
+            Debug.Log($"Attempting to join lobby with code: {lobbyCode}");
+
             JoinLobbyByCodeOptions options = new JoinLobbyByCodeOptions
             {
                 Player = GetPlayer()
