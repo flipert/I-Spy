@@ -7,6 +7,8 @@ using Unity.Services.Lobbies.Models;
 using UnityEngine;
 using UnityEngine.UI; // Required for Button
 using Unity.Netcode;
+using Unity.Services.Relay;
+using Unity.Services.Relay.Models;
 
 public class LobbyManager : MonoBehaviour
 {
@@ -48,40 +50,32 @@ public class LobbyManager : MonoBehaviour
     {
         try
         {
-            // Check if player is signed in
-            if (!AuthenticationService.Instance.IsSignedIn)
+            // Create Relay allocation first
+            string relayCode = await CreateRelayCode();
+            if (string.IsNullOrEmpty(relayCode))
             {
-                Debug.LogError("Player not signed in. Cannot create lobby.");
+                Debug.LogError("Failed to create Relay allocation");
                 return;
             }
 
+            // Create lobby options with Relay code
             CreateLobbyOptions options = new CreateLobbyOptions
             {
-                IsPrivate = false, // Set to true if you want invite-only lobbies
-                Player = GetPlayer(), // Add player data if needed (e.g., username, character)
-                // You can add custom lobby data here if needed
-                // Data = new Dictionary<string, DataObject>
-                // {
-                //     { "GameMode", new DataObject(DataObject.VisibilityOptions.Public, "CaptureTheFlag") }
-                // }
+                IsPrivate = false,
+                Player = GetPlayer(),
+                Data = new Dictionary<string, DataObject>
+                {
+                    { "RelayCode", new DataObject(DataObject.VisibilityOptions.Member, relayCode) }
+                }
             };
 
             Lobby lobby = await LobbyService.Instance.CreateLobbyAsync(lobbyName, maxPlayers, options);
-            hostLobby = lobby; // Store the lobby we are hosting
-            joinedLobby = hostLobby; // Also set joinedLobby when hosting
+            hostLobby = lobby;
+            joinedLobby = hostLobby;
 
-            Debug.Log($"Created Lobby! Name: {lobby.Name}, Code: {lobby.LobbyCode}, Max Players: {lobby.MaxPlayers}");
+            Debug.Log($"Created Lobby with Relay! Name: {lobby.Name}, Code: {lobby.LobbyCode}, Relay Code: {relayCode}");
 
-            // --- Show Lobby UI --- 
-            ShowLobbyUI(); 
-            // ---------------------
-
-            // Start Relay and get Join Code (Next Step)
-            // ... Relay setup code will go here ...
-
-            // Start Heartbeat for the host
-            StartCoroutine(HeartbeatLobbyCoroutine(lobby.Id, 15f));
-
+            ShowLobbyUI();
         }
         catch (LobbyServiceException e)
         {
@@ -352,13 +346,25 @@ public class LobbyManager : MonoBehaviour
     {
         try
         {
+            // Get the Relay code from the lobby data
+            string relayCode = selectedLobby.Data["RelayCode"].Value;
+            
+            // Join the Relay allocation
+            bool relayJoined = await JoinRelay(relayCode);
+            if (!relayJoined)
+            {
+                Debug.LogError("Failed to join Relay");
+                return;
+            }
+
+            // Join the lobby
             JoinLobbyByIdOptions options = new JoinLobbyByIdOptions
             {
                 Player = GetPlayer()
             };
 
             joinedLobby = await LobbyService.Instance.JoinLobbyByIdAsync(selectedLobby.Id, options);
-            Debug.Log($"Joined lobby: {joinedLobby.Name}");
+            Debug.Log($"Joined lobby: {joinedLobby.Name} with Relay code: {relayCode}");
             
             ShowLobbyUI();
         }
@@ -392,6 +398,74 @@ public class LobbyManager : MonoBehaviour
                     mainMenuPanel.SetActive(true);
                 });
             }
+        }
+    }
+
+    private async Task<string> CreateRelayCode()
+    {
+        try
+        {
+            // Create Relay allocation
+            Allocation allocation = await RelayService.Instance.CreateAllocationAsync(4); // Max 4 players
+            
+            // Get the join code
+            string relayCode = await RelayService.Instance.GetJoinCodeAsync(allocation.AllocationId);
+            
+            Debug.Log($"Created Relay allocation with code: {relayCode}");
+            
+            // Set up host's network transport with Relay
+            var transport = NetworkManager.Singleton.GetComponent<Unity.Netcode.Transports.UTP.UnityTransport>();
+            
+            if (transport != null)
+            {
+                transport.SetHostRelayData(
+                    allocation.RelayServer.IpV4,
+                    (ushort)allocation.RelayServer.Port,
+                    allocation.AllocationIdBytes,
+                    allocation.Key,
+                    allocation.ConnectionData
+                );
+            }
+            
+            return relayCode;
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"Failed to create Relay allocation: {e.Message}");
+            return string.Empty;
+        }
+    }
+
+    private async Task<bool> JoinRelay(string relayCode)
+    {
+        try
+        {
+            // Join Relay with code
+            JoinAllocation allocation = await RelayService.Instance.JoinAllocationAsync(relayCode);
+            
+            // Set up client's network transport with Relay
+            var transport = NetworkManager.Singleton.GetComponent<Unity.Netcode.Transports.UTP.UnityTransport>();
+            
+            if (transport != null)
+            {
+                transport.SetClientRelayData(
+                    allocation.RelayServer.IpV4,
+                    (ushort)allocation.RelayServer.Port,
+                    allocation.AllocationIdBytes,
+                    allocation.Key,
+                    allocation.ConnectionData,
+                    allocation.HostConnectionData
+                );
+                
+                return true;
+            }
+            
+            return false;
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"Failed to join Relay: {e.Message}");
+            return false;
         }
     }
 
