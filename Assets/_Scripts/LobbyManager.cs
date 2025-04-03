@@ -42,6 +42,8 @@ public class LobbyManager : MonoBehaviour
     private float heartbeatTimer;
     private float lobbyPollTimer;
     private bool isRefreshingLobbies;
+    private float lobbyUpdateTimer;
+    [SerializeField] private float lobbyUpdateInterval = 1.1f; // Slightly over 1 second to avoid rate limiting
 
     // Wrapper function for the UI Button
     public void CreateLobby_Button()
@@ -361,19 +363,13 @@ public class LobbyManager : MonoBehaviour
 
             QueryLobbiesOptions options = new QueryLobbiesOptions
             {
-                Count = 25, // Number of lobbies to fetch
+                Count = 25,
                 Filters = new List<QueryFilter>
                 {
                     new QueryFilter(
                         field: QueryFilter.FieldOptions.AvailableSlots,
                         op: QueryFilter.OpOptions.GT,
-                        value: "0") // Only show lobbies with available slots
-                },
-                Order = new List<QueryOrder>
-                {
-                    new QueryOrder(
-                        asc: true,
-                        field: QueryOrder.FieldOptions.Created)
+                        value: "0")
                 }
             };
 
@@ -382,11 +378,19 @@ public class LobbyManager : MonoBehaviour
 
             foreach (Lobby lobby in lobbies.Results)
             {
+                // Log each lobby's data for debugging
+                if (lobby.Data != null && lobby.Data.ContainsKey("RelayCode"))
+                {
+                    Debug.Log($"Found Lobby - ID: {lobby.Id}, Code: {lobby.LobbyCode}, Relay Code: {lobby.Data["RelayCode"].Value}");
+                }
+
                 GameObject entryGO = Instantiate(lobbyEntryPrefab, lobbyListContent);
                 LobbyEntryUI entryUI = entryGO.GetComponent<LobbyEntryUI>();
                 if (entryUI != null)
                 {
-                    entryUI.Initialize(lobby, async () => await JoinSelectedLobby(lobby));
+                    // Get a fresh copy of the lobby before joining
+                    var freshLobby = await LobbyService.Instance.GetLobbyAsync(lobby.Id);
+                    entryUI.Initialize(freshLobby, async () => await JoinSelectedLobby(freshLobby));
                 }
             }
         }
@@ -410,8 +414,18 @@ public class LobbyManager : MonoBehaviour
                 return;
             }
 
+            // Get a fresh copy of the lobby before joining
+            selectedLobby = await LobbyService.Instance.GetLobbyAsync(selectedLobby.Id);
+            
             Debug.Log($"Attempting to join lobby: {selectedLobby.Name}");
-            Debug.Log($"Lobby data keys: {string.Join(", ", selectedLobby.Data.Keys)}");
+            if (selectedLobby.Data != null)
+            {
+                Debug.Log($"Lobby data keys: {string.Join(", ", selectedLobby.Data.Keys)}");
+                foreach (var kvp in selectedLobby.Data)
+                {
+                    Debug.Log($"Key: {kvp.Key}, Value: {kvp.Value.Value}");
+                }
+            }
 
             if (selectedLobby.Data == null || !selectedLobby.Data.ContainsKey("RelayCode"))
             {
@@ -419,16 +433,14 @@ public class LobbyManager : MonoBehaviour
                 return;
             }
 
-            // Get the Relay code from the lobby data
             string relayCode = selectedLobby.Data["RelayCode"].Value;
-            
+            Debug.Log($"Attempting to join with Relay code: {relayCode}");
+
             if (string.IsNullOrEmpty(relayCode))
             {
                 Debug.LogError("Relay code is null or empty");
                 return;
             }
-
-            Debug.Log($"Found Relay code: {relayCode}");
 
             // Join the Relay allocation
             bool relayJoined = await JoinRelay(relayCode);
@@ -445,7 +457,7 @@ public class LobbyManager : MonoBehaviour
             };
 
             joinedLobby = await LobbyService.Instance.JoinLobbyByIdAsync(selectedLobby.Id, options);
-            Debug.Log($"Joined lobby: {joinedLobby.Name} with Relay code: {relayCode}");
+            Debug.Log($"Successfully joined lobby: {joinedLobby.Name} with Relay code: {relayCode}");
             
             ShowLobbyUI();
         }
@@ -551,6 +563,58 @@ public class LobbyManager : MonoBehaviour
         {
             Debug.LogError($"Failed to join Relay: {e.Message}");
             return false;
+        }
+    }
+
+    private void Update()
+    {
+        HandleLobbyHeartbeat();
+        HandleLobbyPollAndUpdate();
+    }
+
+    private void HandleLobbyHeartbeat()
+    {
+        if (hostLobby != null)
+        {
+            heartbeatTimer -= Time.deltaTime;
+            if (heartbeatTimer < 0f)
+            {
+                heartbeatTimer = 15f; // Reset timer
+                LobbyService.Instance.SendHeartbeatPingAsync(hostLobby.Id);
+            }
+        }
+    }
+
+    private async void HandleLobbyPollAndUpdate()
+    {
+        if (joinedLobby == null) return;
+
+        lobbyUpdateTimer -= Time.deltaTime;
+        if (lobbyUpdateTimer < 0f)
+        {
+            lobbyUpdateTimer = lobbyUpdateInterval;
+            
+            try
+            {
+                joinedLobby = await LobbyService.Instance.GetLobbyAsync(joinedLobby.Id);
+                UpdatePlayerList();
+                
+                // Log the current lobby data for debugging
+                if (joinedLobby.Data != null && joinedLobby.Data.ContainsKey("RelayCode"))
+                {
+                    Debug.Log($"Current Lobby Data - ID: {joinedLobby.Id}, Code: {joinedLobby.LobbyCode}, Relay Code: {joinedLobby.Data["RelayCode"].Value}");
+                }
+            }
+            catch (LobbyServiceException e)
+            {
+                Debug.LogError($"Failed to update lobby: {e}");
+                // If we can't update the lobby, we might have been kicked or the lobby was deleted
+                if (e.Reason == LobbyExceptionReason.LobbyNotFound)
+                {
+                    joinedLobby = null;
+                    ShowMainMenuUI();
+                }
+            }
         }
     }
 
