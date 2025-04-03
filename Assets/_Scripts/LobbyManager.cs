@@ -58,6 +58,8 @@ public class LobbyManager : MonoBehaviour
                 return;
             }
 
+            Debug.Log($"Created Relay code: {relayCode}");
+
             // Create lobby options with Relay code
             CreateLobbyOptions options = new CreateLobbyOptions
             {
@@ -65,7 +67,14 @@ public class LobbyManager : MonoBehaviour
                 Player = GetPlayer(),
                 Data = new Dictionary<string, DataObject>
                 {
-                    { "RelayCode", new DataObject(DataObject.VisibilityOptions.Member, relayCode) }
+                    { 
+                        "RelayCode", 
+                        new DataObject(
+                            DataObject.VisibilityOptions.Member, 
+                            relayCode,
+                            DataObject.IndexOptions.S1
+                        ) 
+                    }
                 }
             };
 
@@ -74,12 +83,17 @@ public class LobbyManager : MonoBehaviour
             joinedLobby = hostLobby;
 
             Debug.Log($"Created Lobby with Relay! Name: {lobby.Name}, Code: {lobby.LobbyCode}, Relay Code: {relayCode}");
+            Debug.Log($"Lobby Data: {string.Join(", ", lobby.Data.Select(kvp => $"{kvp.Key}: {kvp.Value.Value}"))}");
 
             ShowLobbyUI();
         }
         catch (LobbyServiceException e)
         {
             Debug.LogError($"Failed to create lobby: {e}");
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"Unexpected error creating lobby: {e}");
         }
     }
 
@@ -346,9 +360,27 @@ public class LobbyManager : MonoBehaviour
     {
         try
         {
+            if (selectedLobby == null)
+            {
+                Debug.LogError("Selected lobby is null");
+                return;
+            }
+
+            if (selectedLobby.Data == null || !selectedLobby.Data.ContainsKey("RelayCode"))
+            {
+                Debug.LogError("Lobby does not contain Relay code");
+                return;
+            }
+
             // Get the Relay code from the lobby data
             string relayCode = selectedLobby.Data["RelayCode"].Value;
             
+            if (string.IsNullOrEmpty(relayCode))
+            {
+                Debug.LogError("Relay code is null or empty");
+                return;
+            }
+
             // Join the Relay allocation
             bool relayJoined = await JoinRelay(relayCode);
             if (!relayJoined)
@@ -371,6 +403,10 @@ public class LobbyManager : MonoBehaviour
         catch (LobbyServiceException e)
         {
             Debug.LogError($"Failed to join lobby: {e}");
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"Unexpected error joining lobby: {e}");
         }
     }
 
