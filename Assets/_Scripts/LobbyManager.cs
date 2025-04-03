@@ -32,6 +32,7 @@ public class LobbyManager : MonoBehaviour
     [Header("Lobby Settings")]
     [SerializeField] private string lobbyNameInput = "MyLobby";
     [SerializeField] private int maxPlayersInput = 4;
+    [SerializeField] private float lobbyUpdateInterval = 2f; // Increased to 2 seconds to avoid rate limits
 
     [Header("Lobby UI")]
     [SerializeField] private Transform playerListContent; // Parent transform for player entries
@@ -43,7 +44,6 @@ public class LobbyManager : MonoBehaviour
     private float lobbyPollTimer;
     private bool isRefreshingLobbies;
     private float lobbyUpdateTimer;
-    [SerializeField] private float lobbyUpdateInterval = 1.1f; // Slightly over 1 second to avoid rate limiting
 
     // Wrapper function for the UI Button
     public void CreateLobby_Button()
@@ -379,18 +379,18 @@ public class LobbyManager : MonoBehaviour
             foreach (Lobby lobby in lobbies.Results)
             {
                 // Log each lobby's data for debugging
+                string lobbyInfo = $"Found Lobby - Name: {lobby.Name}, ID: {lobby.Id}, Code: {lobby.LobbyCode}";
                 if (lobby.Data != null && lobby.Data.ContainsKey("RelayCode"))
                 {
-                    Debug.Log($"Found Lobby - ID: {lobby.Id}, Code: {lobby.LobbyCode}, Relay Code: {lobby.Data["RelayCode"].Value}");
+                    lobbyInfo += $", Relay Code: {lobby.Data["RelayCode"].Value}";
                 }
+                Debug.Log(lobbyInfo);
 
                 GameObject entryGO = Instantiate(lobbyEntryPrefab, lobbyListContent);
                 LobbyEntryUI entryUI = entryGO.GetComponent<LobbyEntryUI>();
                 if (entryUI != null)
                 {
-                    // Get a fresh copy of the lobby before joining
-                    var freshLobby = await LobbyService.Instance.GetLobbyAsync(lobby.Id);
-                    entryUI.Initialize(freshLobby, async () => await JoinSelectedLobby(freshLobby));
+                    entryUI.Initialize(lobby, async () => await JoinSelectedLobby(lobby));
                 }
             }
         }
@@ -414,60 +414,12 @@ public class LobbyManager : MonoBehaviour
                 return;
             }
 
-            // Get a fresh copy of the lobby before joining
-            selectedLobby = await LobbyService.Instance.GetLobbyAsync(selectedLobby.Id);
-            
-            Debug.Log($"Attempting to join lobby: {selectedLobby.Name}");
-            if (selectedLobby.Data != null)
-            {
-                Debug.Log($"Lobby data keys: {string.Join(", ", selectedLobby.Data.Keys)}");
-                foreach (var kvp in selectedLobby.Data)
-                {
-                    Debug.Log($"Key: {kvp.Key}, Value: {kvp.Value.Value}");
-                }
-            }
-
-            if (selectedLobby.Data == null || !selectedLobby.Data.ContainsKey("RelayCode"))
-            {
-                Debug.LogError("Lobby does not contain Relay code");
-                return;
-            }
-
-            string relayCode = selectedLobby.Data["RelayCode"].Value;
-            Debug.Log($"Attempting to join with Relay code: {relayCode}");
-
-            if (string.IsNullOrEmpty(relayCode))
-            {
-                Debug.LogError("Relay code is null or empty");
-                return;
-            }
-
-            // Join the Relay allocation
-            bool relayJoined = await JoinRelay(relayCode);
-            if (!relayJoined)
-            {
-                Debug.LogError("Failed to join Relay");
-                return;
-            }
-
-            // Join the lobby
-            JoinLobbyByIdOptions options = new JoinLobbyByIdOptions
-            {
-                Player = GetPlayer()
-            };
-
-            joinedLobby = await LobbyService.Instance.JoinLobbyByIdAsync(selectedLobby.Id, options);
-            Debug.Log($"Successfully joined lobby: {joinedLobby.Name} with Relay code: {relayCode}");
-            
-            ShowLobbyUI();
-        }
-        catch (LobbyServiceException e)
-        {
-            Debug.LogError($"Failed to join lobby: {e}");
+            // Join by lobby code instead of ID for better consistency
+            await JoinLobbyByCode(selectedLobby.LobbyCode);
         }
         catch (System.Exception e)
         {
-            Debug.LogError($"Unexpected error joining lobby: {e}");
+            Debug.LogError($"Unexpected error joining selected lobby: {e}");
         }
     }
 
@@ -585,7 +537,7 @@ public class LobbyManager : MonoBehaviour
         }
     }
 
-    private async void HandleLobbyPollAndUpdate()
+    private void HandleLobbyPollAndUpdate()
     {
         if (joinedLobby == null) return;
 
@@ -596,25 +548,86 @@ public class LobbyManager : MonoBehaviour
             
             try
             {
-                joinedLobby = await LobbyService.Instance.GetLobbyAsync(joinedLobby.Id);
-                UpdatePlayerList();
-                
-                // Log the current lobby data for debugging
-                if (joinedLobby.Data != null && joinedLobby.Data.ContainsKey("RelayCode"))
-                {
-                    Debug.Log($"Current Lobby Data - ID: {joinedLobby.Id}, Code: {joinedLobby.LobbyCode}, Relay Code: {joinedLobby.Data["RelayCode"].Value}");
-                }
+                _ = UpdateLobbyData(); // Fire and forget
             }
-            catch (LobbyServiceException e)
+            catch (System.Exception e)
+            {
+                Debug.LogError($"Error in HandleLobbyPollAndUpdate: {e}");
+            }
+        }
+    }
+
+    private async Task UpdateLobbyData()
+    {
+        try
+        {
+            joinedLobby = await LobbyService.Instance.GetLobbyAsync(joinedLobby.Id);
+            UpdatePlayerList();
+            
+            // Log the current lobby data for debugging
+            if (joinedLobby.Data != null && joinedLobby.Data.ContainsKey("RelayCode"))
+            {
+                Debug.Log($"Current Lobby Data - ID: {joinedLobby.Id}, Code: {joinedLobby.LobbyCode}, Relay Code: {joinedLobby.Data["RelayCode"].Value}");
+            }
+        }
+        catch (LobbyServiceException e)
+        {
+            if (e.Reason == LobbyExceptionReason.RateLimited)
+            {
+                // If rate limited, increase the update interval temporarily
+                lobbyUpdateInterval = Mathf.Min(lobbyUpdateInterval * 1.5f, 5f);
+                Debug.LogWarning($"Rate limited. Increasing update interval to {lobbyUpdateInterval} seconds");
+            }
+            else if (e.Reason == LobbyExceptionReason.LobbyNotFound)
+            {
+                Debug.LogWarning("Lobby no longer exists");
+                joinedLobby = null;
+                ShowMainMenuUI();
+            }
+            else
             {
                 Debug.LogError($"Failed to update lobby: {e}");
-                // If we can't update the lobby, we might have been kicked or the lobby was deleted
-                if (e.Reason == LobbyExceptionReason.LobbyNotFound)
+            }
+        }
+    }
+
+    public async Task JoinLobbyByCode(string lobbyCode)
+    {
+        try
+        {
+            JoinLobbyByCodeOptions options = new JoinLobbyByCodeOptions
+            {
+                Player = GetPlayer()
+            };
+
+            joinedLobby = await LobbyService.Instance.JoinLobbyByCodeAsync(lobbyCode, options);
+            Debug.Log($"Joined lobby by code: {joinedLobby.Name}");
+
+            if (joinedLobby.Data != null && joinedLobby.Data.ContainsKey("RelayCode"))
+            {
+                string relayCode = joinedLobby.Data["RelayCode"].Value;
+                Debug.Log($"Found Relay code in joined lobby: {relayCode}");
+                
+                bool relayJoined = await JoinRelay(relayCode);
+                if (!relayJoined)
                 {
-                    joinedLobby = null;
-                    ShowMainMenuUI();
+                    Debug.LogError("Failed to join Relay after joining lobby by code");
+                    await LeaveLobby();
+                    return;
                 }
             }
+            else
+            {
+                Debug.LogError("Joined lobby does not contain Relay code");
+                await LeaveLobby();
+                return;
+            }
+
+            ShowLobbyUI();
+        }
+        catch (LobbyServiceException e)
+        {
+            Debug.LogError($"Failed to join lobby by code: {e}");
         }
     }
 
