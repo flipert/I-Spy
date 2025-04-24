@@ -526,13 +526,12 @@ public class LobbyManager : MonoBehaviour
         try
         {
             // Create Relay allocation
-            // The second parameter is for region, not lifetime
             Allocation allocation = await RelayService.Instance.CreateAllocationAsync(4); // Max 4 players
             
             // Get the join code
             string relayCode = await RelayService.Instance.GetJoinCodeAsync(allocation.AllocationId);
             
-            Debug.Log($"Created Relay allocation with code: {relayCode} (region: {allocation.Region})");
+            Debug.Log($"Created Relay allocation with code: {relayCode}");
             
             // Set up host's network transport with Relay
             var transport = NetworkManager.Singleton.GetComponent<Unity.Netcode.Transports.UTP.UnityTransport>();
@@ -562,128 +561,109 @@ public class LobbyManager : MonoBehaviour
 
     private async Task<bool> JoinRelay(string relayCode)
     {
-        // Number of retry attempts
-        const int maxRetries = 3;
-        // Delay between retries (in milliseconds)
-        const int retryDelayMs = 1000;
-        
-        for (int attempt = 0; attempt < maxRetries; attempt++)
+        try
         {
-            try
-            {
-                // If this is a retry attempt, log it and wait before trying again
-                if (attempt > 0)
-                {
-                    Debug.Log($"Retry attempt {attempt}/{maxRetries-1} to join Relay with code: {relayCode}");
-                    // Wait before retrying
-                    await Task.Delay(retryDelayMs);
-                }
-                else
-                {
-                    Debug.Log($"Attempting to join Relay with code: {relayCode}");
-                }
+            Debug.Log($"Attempting to join Relay with code: {relayCode}");
 
-                // Join Relay with code
-                JoinAllocation allocation = await RelayService.Instance.JoinAllocationAsync(relayCode);
-                Debug.Log($"Successfully joined Relay allocation with ID: {allocation.AllocationId}");
-                
-                // Set up client's network transport with Relay
-                var transport = NetworkManager.Singleton.GetComponent<Unity.Netcode.Transports.UTP.UnityTransport>();
-                
-                if (transport != null)
-                {
-                    transport.SetClientRelayData(
-                        allocation.RelayServer.IpV4,
-                        (ushort)allocation.RelayServer.Port,
-                        allocation.AllocationIdBytes,
-                        allocation.Key,
-                        allocation.ConnectionData,
-                        allocation.HostConnectionData
-                    );
-
-                    Debug.Log("Successfully configured client relay data");
-                    return true;
-                }
-                
-                Debug.LogError("Failed to find Unity Transport component");
-                return false;
-            }
-            catch (System.Exception e)
+            // Join Relay with code
+            JoinAllocation allocation = await RelayService.Instance.JoinAllocationAsync(relayCode);
+            Debug.Log($"Successfully joined Relay allocation with ID: {allocation.AllocationId}");
+            
+            // Set up client's network transport with Relay
+            var transport = NetworkManager.Singleton.GetComponent<Unity.Netcode.Transports.UTP.UnityTransport>();
+            
+            if (transport != null)
             {
-                // On last attempt, log error and return false
-                if (attempt == maxRetries - 1)
-                {
-                    Debug.LogError($"Failed to join Relay with code '{relayCode}' after {maxRetries} attempts: {e.Message}");
-                    return false;
-                }
-                
-                // Otherwise, log warning and continue to next retry
-                Debug.LogWarning($"Attempt {attempt+1}/{maxRetries} to join Relay failed: {e.Message}. Retrying...");
+                transport.SetClientRelayData(
+                    allocation.RelayServer.IpV4,
+                    (ushort)allocation.RelayServer.Port,
+                    allocation.AllocationIdBytes,
+                    allocation.Key,
+                    allocation.ConnectionData,
+                    allocation.HostConnectionData
+                );
+
+                Debug.Log("Successfully configured client relay data");
+                return true;
             }
+            
+            Debug.LogError("Failed to find Unity Transport component");
+            return false;
         }
-        
-        // This should never be reached due to the return in the last catch block, but added for safety
-        return false;
+        catch (System.Exception e)
+        {
+            Debug.LogError($"Failed to join Relay: {e.Message}");
+            
+            // If the join code is not found, we should try to get a fresh relay code from the lobby
+            if (e.Message.Contains("Not Found: join code not found") && joinedLobby != null)
+            {
+                Debug.Log("Attempting to get fresh Relay code from lobby...");
+                try
+                {
+                    // Get a fresh copy of the lobby
+                    joinedLobby = await LobbyService.Instance.GetLobbyAsync(joinedLobby.Id);
+                    
+                    if (joinedLobby.Data != null && joinedLobby.Data.ContainsKey("RelayCode"))
+                    {
+                        string freshRelayCode = joinedLobby.Data["RelayCode"].Value;
+                        Debug.Log($"Got fresh Relay code: {freshRelayCode}. Attempting to join again...");
+                        return await JoinRelay(freshRelayCode);
+                    }
+                }
+                catch (LobbyServiceException le)
+                {
+                    Debug.LogError($"Failed to get fresh lobby data: {le.Message}");
+                }
+            }
+            
+            return false;
+        }
     }
 
-    public async void JoinLobbyByCode_Button(string lobbyCode)
-    {
-       await JoinLobbyByCode(lobbyCode);
-    }
-    
-    // Joins a lobby using the provided lobby code
     public async Task JoinLobbyByCode(string lobbyCode)
     {
         try
         {
+            if (string.IsNullOrWhiteSpace(lobbyCode))
+            {
+                Debug.LogError("Cannot join lobby: Provided lobby code is null or empty");
+                return;
+            }
+
+            Debug.Log($"Attempting to join lobby with code: {lobbyCode}");
+
             JoinLobbyByCodeOptions options = new JoinLobbyByCodeOptions
             {
                 Player = GetPlayer()
             };
 
-            Lobby lobby = await LobbyService.Instance.JoinLobbyByCodeAsync(lobbyCode, options);
-            joinedLobby = lobby; // Assign to joinedLobby
+            joinedLobby = await LobbyService.Instance.JoinLobbyByCodeAsync(lobbyCode, options);
+            Debug.Log($"Successfully joined lobby: {joinedLobby.Name}");
 
-            Debug.Log($"Successfully joined lobby with code: {lobbyCode}");
-
-            // Log detailed information about the joined lobby
-            string lobbyInfo = $"\\nJoined Lobby:";
-            lobbyInfo += $"\\n- Name: {lobby.Name}";
-            lobbyInfo += $"\\n- ID: {lobby.Id}";
-            lobbyInfo += $"\\n- Code: {lobby.LobbyCode}"; // This is the Lobby Code, not Relay Code
-            lobbyInfo += $"\\n- Players: {lobby.Players.Count}/{lobby.MaxPlayers}";
-            lobbyInfo += $"\\n- Host ID: {lobby.HostId}";
-            if (lobby.Data != null)
+            if (joinedLobby.Data != null && joinedLobby.Data.ContainsKey("RelayCode"))
             {
-                foreach (var data in lobby.Data)
+                string relayCode = joinedLobby.Data["RelayCode"].Value;
+                Debug.Log($"Found Relay code in joined lobby: {relayCode}");
+                
+                // Try joining the Relay
+                bool relayJoined = await JoinRelay(relayCode);
+                if (!relayJoined)
                 {
-                    lobbyInfo += $"\\n- Data: {data.Key} = {data.Value.Value}";
+                    Debug.LogError("Failed to join Relay after joining lobby by code");
+                    await LeaveLobby();
+                    return;
                 }
-            }
-            Debug.Log(lobbyInfo);
-
-            // Attempt to join Relay using the code from the lobby data
-            if (lobby.Data != null && lobby.Data.ContainsKey("RelayCode"))
-            {
-                string relayCode = lobby.Data["RelayCode"].Value;
-                Debug.Log($"Attempting to join Relay using code from lobby data: {relayCode}");
-                bool joinedRelay = await JoinRelay(relayCode);
-
-                if (!joinedRelay)
-                {
-                    Debug.LogError("Failed to join Relay after joining lobby by code. Leaving lobby.");
-                    await LeaveLobby(); // Leave if Relay fails
-                    return; // Stop execution
-                }
+                
+                Debug.Log("Successfully joined both Lobby and Relay!");
             }
             else
             {
-                Debug.LogError("Joined lobby does not contain RelayCode in its data. Leaving lobby.");
-                await LeaveLobby(); // Leave if Relay code is missing
-                return; // Stop execution
+                Debug.LogError("Joined lobby does not contain Relay code");
+                await LeaveLobby();
+                return;
             }
 
-            ShowLobbyUI(); // Show lobby UI only after successful join and Relay connection
+            ShowLobbyUI();
         }
         catch (LobbyServiceException e)
         {
@@ -692,4 +672,5 @@ public class LobbyManager : MonoBehaviour
     }
 
     // --- Find/Join Lobby Functions (To be added later) ---
-}
+
+} 
