@@ -44,6 +44,116 @@ public class LobbyManager : MonoBehaviour
     private float lobbyPollTimer;
     private bool isRefreshingLobbies;
     private float lobbyUpdateTimer;
+    private int previousPlayerCount = 0; // Track previous player count to detect joins
+
+    // Add this to track if game is starting
+    private bool isGameStarting = false;
+    private const string KEY_GAME_STARTING = "GameStarting";
+
+    private void Update()
+    {
+        // Handle heartbeat for hosted lobbies
+        HandleLobbyHeartbeat();
+        
+        // Poll for lobby updates when in a lobby
+        PollForLobbyUpdates();
+    }
+
+    private void HandleLobbyHeartbeat()
+    {
+        if (hostLobby != null)
+        {
+            if (heartbeatTimer <= 0f)
+            {
+                heartbeatTimer = 15f; // Reset timer
+                LobbyService.Instance.SendHeartbeatPingAsync(hostLobby.Id).ContinueWith(
+                    (task) => {
+                        if (task.IsFaulted)
+                        {
+                            Debug.LogError($"Failed to send heartbeat: {task.Exception}");
+                        }
+                        else
+                        {
+                            Debug.Log("Sent lobby heartbeat ping");
+                        }
+                    });
+            }
+            else
+            {
+                heartbeatTimer -= Time.deltaTime;
+            }
+        }
+    }
+
+    private async void PollForLobbyUpdates()
+    {
+        // Only poll if we're in a lobby but not hosting (host has the source of truth)
+        if (joinedLobby != null && !IsLobbyHost())
+        {
+            if (lobbyPollTimer <= 0f)
+            {
+                lobbyPollTimer = lobbyUpdateInterval; // Reset timer
+                
+                try
+                {
+                    Lobby updatedLobby = await LobbyService.Instance.GetLobbyAsync(joinedLobby.Id);
+                    
+                    // Check if player count has changed (someone joined or left)
+                    if (updatedLobby.Players.Count != previousPlayerCount)
+                    {
+                        Debug.Log($"Player count changed: {previousPlayerCount} -> {updatedLobby.Players.Count}");
+                        
+                        // If player count increased, someone joined
+                        if (updatedLobby.Players.Count > previousPlayerCount)
+                        {
+                            // Find the new player(s)
+                            foreach (Player player in updatedLobby.Players)
+                            {
+                                bool isNewPlayer = true;
+                                foreach (Player existingPlayer in joinedLobby.Players)
+                                {
+                                    if (existingPlayer.Id == player.Id)
+                                    {
+                                        isNewPlayer = false;
+                                        break;
+                                    }
+                                }
+                                
+                                if (isNewPlayer)
+                                {
+                                    Debug.Log($"<color=green>New player joined the lobby: {player.Id}</color>");
+                                }
+                            }
+                        }
+                        
+                        previousPlayerCount = updatedLobby.Players.Count;
+                    }
+                    
+                    // Check if game is starting
+                    if (!isGameStarting && updatedLobby.Data != null && 
+                        updatedLobby.Data.ContainsKey(KEY_GAME_STARTING) && 
+                        updatedLobby.Data[KEY_GAME_STARTING].Value == "true")
+                    {
+                        Debug.Log("<color=yellow>Host has started the game! Starting countdown...</color>");
+                        isGameStarting = true;
+                        StartCoroutine(StartGameCountdown());
+                    }
+                    
+                    // Update our local copy of the lobby
+                    joinedLobby = updatedLobby;
+                    UpdatePlayerList();
+                }
+                catch (LobbyServiceException e)
+                {
+                    Debug.LogWarning($"Failed to poll for lobby updates: {e.Message}");
+                }
+            }
+            else
+            {
+                lobbyPollTimer -= Time.deltaTime;
+            }
+        }
+    }
 
     // Wrapper function for the UI Button
     public void CreateLobby_Button()
@@ -217,6 +327,7 @@ public class LobbyManager : MonoBehaviour
     {
         if (mainMenuPanel) mainMenuPanel.SetActive(false);
         if (lobbyPanel) lobbyPanel.SetActive(true);
+        if (lobbyBrowserPanel) lobbyBrowserPanel.SetActive(false); // Hide the lobby browser panel
 
         if (lobbyCodeText != null && joinedLobby != null)
         {
@@ -300,7 +411,52 @@ public class LobbyManager : MonoBehaviour
         }
 
         Debug.Log("Host is starting the game...");
+        
+        // Update lobby data to notify clients that game is starting
+        try
+        {
+            UpdateLobbyGameStartingStatus(true);
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"Failed to update lobby game starting status: {e.Message}");
+        }
+        
         StartCoroutine(StartGameCountdown());
+    }
+    
+    private async void UpdateLobbyGameStartingStatus(bool isStarting)
+    {
+        if (hostLobby == null) return;
+        
+        try
+        {
+            // Create update data
+            UpdateLobbyOptions options = new UpdateLobbyOptions
+            {
+                Data = new Dictionary<string, DataObject>
+                {
+                    {
+                        KEY_GAME_STARTING,
+                        new DataObject(
+                            DataObject.VisibilityOptions.Member,
+                            isStarting ? "true" : "false"
+                        )
+                    }
+                }
+            };
+            
+            // Update the lobby
+            Lobby updatedLobby = await LobbyService.Instance.UpdateLobbyAsync(hostLobby.Id, options);
+            hostLobby = updatedLobby;
+            joinedLobby = updatedLobby;
+            
+            Debug.Log($"Updated lobby game starting status to: {isStarting}");
+        }
+        catch (LobbyServiceException e)
+        {
+            Debug.LogError($"Failed to update lobby game starting status: {e.Message}");
+        }
     }
 
     private System.Collections.IEnumerator StartGameCountdown()
@@ -561,63 +717,68 @@ public class LobbyManager : MonoBehaviour
 
     private async Task<bool> JoinRelay(string relayCode)
     {
-        try
+        // Number of retry attempts
+        const int maxRetries = 3;
+        // Delay between retries (in milliseconds)
+        const int retryDelayMs = 1000;
+        
+        for (int attempt = 0; attempt < maxRetries; attempt++)
         {
-            Debug.Log($"Attempting to join Relay with code: {relayCode}");
-
-            // Join Relay with code
-            JoinAllocation allocation = await RelayService.Instance.JoinAllocationAsync(relayCode);
-            Debug.Log($"Successfully joined Relay allocation with ID: {allocation.AllocationId}");
-            
-            // Set up client's network transport with Relay
-            var transport = NetworkManager.Singleton.GetComponent<Unity.Netcode.Transports.UTP.UnityTransport>();
-            
-            if (transport != null)
+            try
             {
-                transport.SetClientRelayData(
-                    allocation.RelayServer.IpV4,
-                    (ushort)allocation.RelayServer.Port,
-                    allocation.AllocationIdBytes,
-                    allocation.Key,
-                    allocation.ConnectionData,
-                    allocation.HostConnectionData
-                );
+                // If this is a retry attempt, log it and wait before trying again
+                if (attempt > 0)
+                {
+                    Debug.Log($"Retry attempt {attempt}/{maxRetries-1} to join Relay with code: {relayCode}");
+                    // Wait before retrying
+                    await Task.Delay(retryDelayMs);
+                }
+                else
+                {
+                    Debug.Log($"Attempting to join Relay with code: {relayCode}");
+                }
 
-                Debug.Log("Successfully configured client relay data");
-                return true;
+                // Join Relay with code - CLIENTS JOIN EXISTING ALLOCATIONS, NOT CREATE NEW ONES
+                JoinAllocation joinAllocation = await RelayService.Instance.JoinAllocationAsync(relayCode);
+                Debug.Log($"Successfully joined Relay allocation with ID: {joinAllocation.AllocationId}");
+                
+                // Set up client's network transport with Relay
+                var transport = NetworkManager.Singleton.GetComponent<Unity.Netcode.Transports.UTP.UnityTransport>();
+                
+                if (transport != null)
+                {
+                    transport.SetClientRelayData(
+                        joinAllocation.RelayServer.IpV4,
+                        (ushort)joinAllocation.RelayServer.Port,
+                        joinAllocation.AllocationIdBytes,
+                        joinAllocation.Key,
+                        joinAllocation.ConnectionData,
+                        joinAllocation.HostConnectionData
+                    );
+
+                    Debug.Log("Successfully configured client relay data");
+                    return true;
+                }
+                
+                Debug.LogError("Failed to find Unity Transport component");
+                return false;
             }
-            
-            Debug.LogError("Failed to find Unity Transport component");
-            return false;
-        }
-        catch (System.Exception e)
-        {
-            Debug.LogError($"Failed to join Relay: {e.Message}");
-            
-            // If the join code is not found, we should try to get a fresh relay code from the lobby
-            if (e.Message.Contains("Not Found: join code not found") && joinedLobby != null)
+            catch (System.Exception e)
             {
-                Debug.Log("Attempting to get fresh Relay code from lobby...");
-                try
+                // On last attempt, log error and return false
+                if (attempt == maxRetries - 1)
                 {
-                    // Get a fresh copy of the lobby
-                    joinedLobby = await LobbyService.Instance.GetLobbyAsync(joinedLobby.Id);
-                    
-                    if (joinedLobby.Data != null && joinedLobby.Data.ContainsKey("RelayCode"))
-                    {
-                        string freshRelayCode = joinedLobby.Data["RelayCode"].Value;
-                        Debug.Log($"Got fresh Relay code: {freshRelayCode}. Attempting to join again...");
-                        return await JoinRelay(freshRelayCode);
-                    }
+                    Debug.LogError($"Failed to join Relay with code '{relayCode}' after {maxRetries} attempts: {e.Message}");
+                    return false;
                 }
-                catch (LobbyServiceException le)
-                {
-                    Debug.LogError($"Failed to get fresh lobby data: {le.Message}");
-                }
+                
+                // Otherwise, log warning and continue to next retry
+                Debug.LogWarning($"Attempt {attempt+1}/{maxRetries} to join Relay failed: {e.Message}. Retrying...");
             }
-            
-            return false;
         }
+        
+        // This should never be reached due to the return in the last catch block, but added for safety
+        return false;
     }
 
     public async Task JoinLobbyByCode(string lobbyCode)
