@@ -526,12 +526,13 @@ public class LobbyManager : MonoBehaviour
         try
         {
             // Create Relay allocation
+            // The second parameter is for region, not lifetime
             Allocation allocation = await RelayService.Instance.CreateAllocationAsync(4); // Max 4 players
             
             // Get the join code
             string relayCode = await RelayService.Instance.GetJoinCodeAsync(allocation.AllocationId);
             
-            Debug.Log($"Created Relay allocation with code: {relayCode}");
+            Debug.Log($"Created Relay allocation with code: {relayCode} (region: {allocation.Region})");
             
             // Set up host's network transport with Relay
             var transport = NetworkManager.Singleton.GetComponent<Unity.Netcode.Transports.UTP.UnityTransport>();
@@ -561,41 +562,68 @@ public class LobbyManager : MonoBehaviour
 
     private async Task<bool> JoinRelay(string relayCode)
     {
-        try
+        // Number of retry attempts
+        const int maxRetries = 3;
+        // Delay between retries (in milliseconds)
+        const int retryDelayMs = 1000;
+        
+        for (int attempt = 0; attempt < maxRetries; attempt++)
         {
-            Debug.Log($"Attempting to join Relay with code: {relayCode}");
-
-            // Join Relay with code
-            JoinAllocation allocation = await RelayService.Instance.JoinAllocationAsync(relayCode);
-            Debug.Log($"Successfully joined Relay allocation with ID: {allocation.AllocationId}");
-            
-            // Set up client's network transport with Relay
-            var transport = NetworkManager.Singleton.GetComponent<Unity.Netcode.Transports.UTP.UnityTransport>();
-            
-            if (transport != null)
+            try
             {
-                transport.SetClientRelayData(
-                    allocation.RelayServer.IpV4,
-                    (ushort)allocation.RelayServer.Port,
-                    allocation.AllocationIdBytes,
-                    allocation.Key,
-                    allocation.ConnectionData,
-                    allocation.HostConnectionData
-                );
+                // If this is a retry attempt, log it and wait before trying again
+                if (attempt > 0)
+                {
+                    Debug.Log($"Retry attempt {attempt}/{maxRetries-1} to join Relay with code: {relayCode}");
+                    // Wait before retrying
+                    await Task.Delay(retryDelayMs);
+                }
+                else
+                {
+                    Debug.Log($"Attempting to join Relay with code: {relayCode}");
+                }
 
-                Debug.Log("Successfully configured client relay data");
-                return true;
+                // Join Relay with code
+                JoinAllocation allocation = await RelayService.Instance.JoinAllocationAsync(relayCode);
+                Debug.Log($"Successfully joined Relay allocation with ID: {allocation.AllocationId}");
+                
+                // Set up client's network transport with Relay
+                var transport = NetworkManager.Singleton.GetComponent<Unity.Netcode.Transports.UTP.UnityTransport>();
+                
+                if (transport != null)
+                {
+                    transport.SetClientRelayData(
+                        allocation.RelayServer.IpV4,
+                        (ushort)allocation.RelayServer.Port,
+                        allocation.AllocationIdBytes,
+                        allocation.Key,
+                        allocation.ConnectionData,
+                        allocation.HostConnectionData
+                    );
+
+                    Debug.Log("Successfully configured client relay data");
+                    return true;
+                }
+                
+                Debug.LogError("Failed to find Unity Transport component");
+                return false;
             }
-            
-            Debug.LogError("Failed to find Unity Transport component");
-            return false;
+            catch (System.Exception e)
+            {
+                // On last attempt, log error and return false
+                if (attempt == maxRetries - 1)
+                {
+                    Debug.LogError($"Failed to join Relay with code '{relayCode}' after {maxRetries} attempts: {e.Message}");
+                    return false;
+                }
+                
+                // Otherwise, log warning and continue to next retry
+                Debug.LogWarning($"Attempt {attempt+1}/{maxRetries} to join Relay failed: {e.Message}. Retrying...");
+            }
         }
-        catch (System.Exception e)
-        {
-            // Log the specific relay code that failed
-            Debug.LogError($"Failed to join Relay with code '{relayCode}': {e.Message}");
-            return false; // Return false directly on any exception
-        }
+        
+        // This should never be reached due to the return in the last catch block, but added for safety
+        return false;
     }
 
     public async void JoinLobbyByCode_Button(string lobbyCode)
