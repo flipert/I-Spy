@@ -131,20 +131,45 @@ public class PlayerSpawner : MonoBehaviour
         Vector3 spawnPosition = spawnPoint != null ? spawnPoint.position : Vector3.zero;
         Quaternion spawnRotation = spawnPoint != null ? spawnPoint.rotation : Quaternion.identity;
         
-        // Get the selected character prefab from NetworkManagerUI based on ClientID
+        // Get the character selection from NetworkManagerUI
         GameObject characterPrefab = null;
+        
+        // First try to find NetworkManagerUI if it's not already accessible
+        if (NetworkManagerUI.Instance == null)
+        {
+            // Try to find it in the scene
+            NetworkManagerUI foundUI = FindObjectOfType<NetworkManagerUI>();
+            if (foundUI != null)
+            {
+                Debug.Log("PlayerSpawner: Found NetworkManagerUI in scene");
+                // This shouldn't be necessary if Singleton pattern works correctly,
+                // but just in case there's an issue with the singleton implementation
+                DontDestroyOnLoad(foundUI.gameObject);
+            }
+            else
+            {
+                Debug.LogWarning("PlayerSpawner: NetworkManagerUI not found in scene. Will use fallback player prefab.");
+            }
+        }
+        
+        // Now try to get character selection
         if (NetworkManagerUI.Instance != null)
         {
+            // Get the character selection for this client
             int characterIndex = NetworkManagerUI.Instance.GetClientCharacterIndex(clientId);
+            Debug.Log($"PlayerSpawner: Character index for client {clientId} is {characterIndex}");
+            
+            // Get the prefab based on the character index
             GameObject[] availablePrefabs = NetworkManagerUI.Instance.CharacterPrefabs;
             
             if (availablePrefabs != null && characterIndex >= 0 && characterIndex < availablePrefabs.Length)
             {
                 characterPrefab = availablePrefabs[characterIndex];
+                Debug.Log($"PlayerSpawner: Selected character prefab {characterPrefab.name} for client {clientId}");
             }
             else
             {
-                 Debug.LogWarning($"PlayerSpawner: Invalid character index ({characterIndex}) or no prefabs available for client {clientId}. Using fallback.");
+                Debug.LogWarning($"PlayerSpawner: Invalid character index ({characterIndex}) or no prefabs available for client {clientId}. Using fallback.");
             }
         }
         else
@@ -155,10 +180,19 @@ public class PlayerSpawner : MonoBehaviour
         // Fallback to default prefab if no selection or error occurred
         if (characterPrefab == null)
         {
-            Debug.LogWarning("PlayerSpawner: No character prefab selected, using fallback");
-            characterPrefab = fallbackPlayerPrefab;
+            // Last resort - try to find any player prefab in Resources
+            characterPrefab = Resources.Load<GameObject>("PlayerPrefabs/DefaultPlayer");
             
-            if (characterPrefab == null)
+            if (characterPrefab != null)
+            {
+                Debug.Log("PlayerSpawner: Found fallback player prefab in Resources folder");
+            }
+            else if (fallbackPlayerPrefab != null)
+            {
+                Debug.Log("PlayerSpawner: Using explicitly assigned fallback player prefab");
+                characterPrefab = fallbackPlayerPrefab;
+            }
+            else
             {
                 Debug.LogError("PlayerSpawner: No fallback player prefab assigned!");
                 return;

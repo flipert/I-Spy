@@ -160,74 +160,84 @@ public class LobbyManager : MonoBehaviour
     {
         // Call the async method but don't wait for it here (fire and forget for UI)
         // The _ discards the returned Task to avoid compiler warnings
-        _ = CreateLobby(lobbyNameInput, maxPlayersInput);
+        _ = CreateLobby(lobbyNameInput, maxPlayersInput, false);
     }
 
     // Added async keyword
-    public async Task CreateLobby(string lobbyName, int maxPlayers)
+    private async Task<bool> CreateLobby(string lobbyName, int maxPlayers, bool isPrivate)
     {
         try
         {
-            // Create Relay allocation first
+            // Create player object for the host
+            Player player = GetPlayer();
+            
+            // Generate a relay code for the lobby
             string relayCode = await CreateRelayCode();
+            
             if (string.IsNullOrEmpty(relayCode))
             {
-                Debug.LogError("Failed to create Relay allocation");
-                return;
+                Debug.LogError("Failed to create Relay Allocation.");
+                return false;
             }
-
-            Debug.Log($"Created Relay code: {relayCode}");
-
-            // Create lobby options with Relay code
+            
+            Debug.Log($"Relay code for lobby: {relayCode}");
+            
+            // Create lobby options
             CreateLobbyOptions options = new CreateLobbyOptions
             {
-                IsPrivate = false,
-                Player = GetPlayer(),
+                IsPrivate = isPrivate,
+                Player = player,
                 Data = new Dictionary<string, DataObject>
                 {
-                    { 
-                        "RelayCode", 
-                        new DataObject(
-                            DataObject.VisibilityOptions.Public,
+                    // Store the relay code in the lobby data
+                    {
+                        "RelayCode", new DataObject(
+                            DataObject.VisibilityOptions.Member,
                             relayCode
-                        ) 
+                        )
+                    },
+                    // Add a timestamp to help with relay code validation
+                    {
+                        "RelayTimestamp", new DataObject(
+                            DataObject.VisibilityOptions.Member,
+                            System.DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString()
+                        )
+                    },
+                    // Add a flag to track game starting state
+                    {
+                        KEY_GAME_STARTING, new DataObject(
+                            DataObject.VisibilityOptions.Member,
+                            "false"
+                        )
                     }
                 }
             };
 
+            // Create lobby with Unity Services
             Lobby lobby = await LobbyService.Instance.CreateLobbyAsync(lobbyName, maxPlayers, options);
             hostLobby = lobby;
-            joinedLobby = hostLobby;
-
-            // Log detailed information about the created lobby
-            Debug.Log($"Created Lobby Details:");
-            Debug.Log($"- Name: {lobby.Name}");
-            Debug.Log($"- ID: {lobby.Id}");
-            Debug.Log($"- Code: {lobby.LobbyCode}");
-            Debug.Log($"- Max Players: {lobby.MaxPlayers}");
-            Debug.Log($"- Host ID: {lobby.HostId}");
-            Debug.Log($"- Is Private: {lobby.IsPrivate}");
-            if (lobby.Data != null)
-            {
-                foreach (var data in lobby.Data)
-                {
-                    Debug.Log($"- Data: {data.Key} = {data.Value.Value}");
-                }
-            }
-
+            joinedLobby = lobby;
+            
+            // Store the host's lobby locally
+            Debug.Log($"Created Lobby with ID: {lobby.Id} and Code: {lobby.LobbyCode}");
+            
+            // Show the lobby UI
             ShowLobbyUI();
-
-            // Start the heartbeat
-            heartbeatTimer = 15f;
-            StartCoroutine(HeartbeatLobbyCoroutine(lobby.Id, 15f));
+            
+            // Start heartbeat to keep lobby alive
+            StartCoroutine(HeartbeatLobbyCoroutine(lobby.Id, 30f));
+            
+            return true;
         }
         catch (LobbyServiceException e)
         {
             Debug.LogError($"Failed to create lobby: {e}");
+            return false;
         }
         catch (System.Exception e)
         {
             Debug.LogError($"Unexpected error creating lobby: {e}");
+            return false;
         }
     }
 
@@ -271,12 +281,84 @@ public class LobbyManager : MonoBehaviour
     // Coroutine to send heartbeat pings for hosted lobbies
     private System.Collections.IEnumerator HeartbeatLobbyCoroutine(string lobbyId, float waitTimeSeconds)
     {
-        var delay = new WaitForSecondsRealtime(waitTimeSeconds);
+        // Ensure we're not sending heartbeats too frequently (Unity has a rate limit)
+        // Recommended minimum is 30 seconds between heartbeats
+        float safeWaitTime = Mathf.Max(waitTimeSeconds, 30f);
+        var delay = new WaitForSecondsRealtime(safeWaitTime);
+        
+        // Reset the failure counter when starting a new heartbeat coroutine
+        heartbeatFailureCount = 0;
+        
         while (hostLobby != null) // Continue as long as we are hosting this lobby
         {
-            LobbyService.Instance.SendHeartbeatPingAsync(lobbyId);
-            Debug.Log("Lobby Heartbeat Sent");
+            // Wait before sending heartbeat to prevent rate limiting
             yield return delay;
+            
+            // Send the heartbeat directly (no ref parameter needed anymore)
+            try
+            {
+                LobbyService.Instance.SendHeartbeatPingAsync(lobbyId);
+                Debug.Log("Lobby Heartbeat Sent");
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning($"Error sending heartbeat: {e.Message}");
+            }
+            
+            // Wait for next heartbeat opportunity
+            yield return delay;
+        }
+    }
+    
+    // Store failure count as a field instead of passing by ref
+    private int heartbeatFailureCount = 0;
+    private readonly int MAX_HEARTBEAT_FAILURES = 5;
+    
+    private void SendHeartbeat(string lobbyId, ref int failureCount, int maxFailures)
+    {
+        try
+        {
+            // Store the current failure count locally for this scope
+            heartbeatFailureCount = failureCount;
+            int localMaxFailures = maxFailures;
+            
+            // Send heartbeat asynchronously
+            LobbyService.Instance.SendHeartbeatPingAsync(lobbyId)
+                .ContinueWith(task => {
+                    if (task.IsFaulted) 
+                    {
+                        heartbeatFailureCount++;
+                        // Only log every other failure to reduce console spam
+                        if (heartbeatFailureCount % 2 == 0)
+                        {
+                            Debug.LogWarning($"Lobby heartbeat failed {heartbeatFailureCount}/{localMaxFailures} times: {task.Exception?.InnerException?.Message}");
+                        }
+                        
+                        // If we've failed too many times, stop trying
+                        if (heartbeatFailureCount >= localMaxFailures)
+                        {
+                            Debug.LogError("Too many lobby heartbeat failures. Lobby may expire.");
+                            // Could add UI notification here
+                        }
+                    }
+                    else
+                    {
+                        // Reset failure count on success
+                        heartbeatFailureCount = 0;
+                        Debug.Log("Lobby Heartbeat Sent Successfully");
+                    }
+                    
+                    // Update the original failure count after task completes
+                    // This is executed on a different thread, so it doesn't directly update the parameter
+                });
+            
+            // Return the current value (this will be read after the lambda runs)
+            failureCount = heartbeatFailureCount;
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogWarning($"Error sending heartbeat: {e.Message}");
+            failureCount++;
         }
     }
     
@@ -415,13 +497,26 @@ public class LobbyManager : MonoBehaviour
         // Update lobby data to notify clients that game is starting
         try
         {
+            // This broadcasts to all clients that the game is starting
             UpdateLobbyGameStartingStatus(true);
+            
+            // Make sure the lobby data is set properly before proceeding
+            if (hostLobby != null && hostLobby.Data != null && hostLobby.Data.ContainsKey(KEY_GAME_STARTING))
+            {
+                Debug.Log($"Game starting status in lobby: {hostLobby.Data[KEY_GAME_STARTING].Value}");
+            }
+            else
+            {
+                Debug.LogWarning("Failed to verify game starting state in lobby data");
+            }
         }
         catch (System.Exception e)
         {
             Debug.LogError($"Failed to update lobby game starting status: {e.Message}");
+            // Continue anyway since we have other ways to notify clients
         }
         
+        // Start the countdown coroutine
         StartCoroutine(StartGameCountdown());
     }
     
@@ -508,23 +603,302 @@ public class LobbyManager : MonoBehaviour
             }
         }
 
+        // Ensure transport is properly configured before starting the network connection
+        var transport = NetworkManager.Singleton.GetComponent<Unity.Netcode.Transports.UTP.UnityTransport>();
+        if (transport == null)
+        {
+            Debug.LogError("Could not find UnityTransport component on NetworkManager!");
+            yield break;
+        }
+
+        // For clients, ensure we have a valid connection before proceeding
+        if (!IsLobbyHost())
+        {
+            // Verify we have transport data already configured
+            if (string.IsNullOrEmpty(transport.ConnectionData.Address) || transport.ConnectionData.Address == "0.0.0.0")
+            {
+                Debug.LogError("Client doesn't have valid connection data configured");
+                
+                // Set a timeout to notify the player
+                if (countdownText != null)
+                {
+                    countdownText.text = "Connection error!";
+                    countdownText.color = Color.red;
+                }
+                yield break;
+            }
+            else
+            {
+                Debug.Log($"Client using existing connection data: {transport.ConnectionData.Address}:{transport.ConnectionData.Port}");
+            }
+        }
+
+        // Make sure we persist required objects through scene changes
+        if (NetworkManager.Singleton != null && NetworkManager.Singleton.gameObject != null)
+        {
+            DontDestroyOnLoad(NetworkManager.Singleton.gameObject);
+            
+            // Register for transport failures
+            NetworkManager.Singleton.OnTransportFailure += OnTransportFailure;
+        }
+
         // Start networking based on role (host or client)
-        if (IsLobbyHost() && NetworkManager.Singleton != null)
+        if (IsLobbyHost())
         {
             Debug.Log("Starting as host...");
+            
+            // Call the preservation method to ensure NetworkManager persists
+            PreserveNetworkObjects();
+            
+            // Start the network as host
             NetworkManager.Singleton.StartHost();
             
-            // Load the game scene - this will be handled by NetworkManager now
-            // This will automatically synchronize to all connected clients
-            NetworkManager.Singleton.SceneManager.LoadScene("Game", UnityEngine.SceneManagement.LoadSceneMode.Single);
+            // Wait to ensure connection is established
+            yield return new WaitForSeconds(1.0f);
+            
+            try 
+            {
+                // Determine the scene to load
+                string sceneToLoad = "Game";
+                Debug.Log($"Host loading game scene: {sceneToLoad}");
+                
+                // Try to use NetworkSceneManager if possible, otherwise fall back to direct loading
+                if (NetworkManager.Singleton.SceneManager != null)
+                {
+                    Debug.Log("Loading scene via NetworkSceneManager");
+                    NetworkManager.Singleton.SceneManager.LoadScene(sceneToLoad, UnityEngine.SceneManagement.LoadSceneMode.Single);
+                }
+                else
+                {
+                    Debug.Log("NetworkSceneManager not available, loading scene directly");
+                    UnityEngine.SceneManagement.SceneManager.LoadScene(sceneToLoad);
+                }
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"Error loading game scene: {e.Message}");
+                // Show error to host
+                if (countdownText != null)
+                {
+                    countdownText.text = "Failed to start game!";
+                    countdownText.color = Color.red;
+                }
+                
+                // Re-enable start button in case they want to try again
+                if (startGameButton) startGameButton.interactable = true;
+            }
         }
-        else if (!IsLobbyHost() && NetworkManager.Singleton != null)
+        else // Client
         {
             Debug.Log("Starting as client...");
-            NetworkManager.Singleton.StartClient();
             
-            // The host will handle scene loading for clients through NetworkManager's scene management
-            Debug.Log("Waiting for host to load the game scene...");
+            // Setup timeout to prevent client from waiting indefinitely
+            float connectionTimeout = 15f; // 15 seconds timeout
+            float startTime = Time.time;
+            bool connected = false;
+            
+            // Show connecting message
+            if (countdownText != null)
+            {
+                countdownText.text = "Connecting...";
+            }
+            
+            // Start client connection - outside try block to avoid yield issues
+            bool connectionStarted = true;
+            try
+            {
+                NetworkManager.Singleton.StartClient();
+            }
+            catch (System.Exception e)
+            {
+                connectionStarted = false;
+                Debug.LogError($"Error starting client connection: {e.Message}");
+                if (countdownText != null)
+                {
+                    countdownText.text = "Connection error!";
+                    countdownText.color = Color.red;
+                }
+            }
+            
+            // Only proceed with connection check if we successfully started connecting
+            if (connectionStarted)
+            {
+                // Wait for connection to be established or timeout
+                while (!connected && Time.time - startTime < connectionTimeout)
+                {
+                    // Check if client is connected
+                    if (NetworkManager.Singleton.IsConnectedClient)
+                    {
+                        connected = true;
+                        Debug.Log("Client successfully connected to host!");
+                        
+                        // Update UI
+                        if (countdownText != null)
+                        {
+                            countdownText.text = "Connected! Waiting for game start...";
+                        }
+                        
+                        // Break out of the waiting loop
+                        break;
+                    }
+                    
+                    // Wait a bit before checking again
+                    yield return new WaitForSeconds(0.5f);
+                }
+                
+                // Handle timeout
+                if (!connected)
+                {
+                    Debug.LogError("Client connection timed out!");
+                    if (countdownText != null)
+                    {
+                        countdownText.text = "Connection timed out!";
+                        countdownText.color = Color.red;
+                    }
+                    
+                    // Could add a retry button here
+                }
+                else
+                {
+                    // Successfully connected, now register for scene events and wait for host to load the game scene
+                    Debug.Log("Client connected and waiting for host to load the game scene");
+                    
+                    // Register for scene load completion events
+                    if (NetworkManager.Singleton != null)
+                    {
+                        Debug.Log("Setting up scene change detection");
+                        
+                        // Use a simpler scene transition approach - just wait 5 seconds for scene to transition
+                        // and then manually check if we need to load it
+                        StartCoroutine(CheckAndLoadGameScene());
+                    }
+                    else
+                    {
+                        Debug.LogError("NetworkManager or SceneManager is null, cannot register for scene events");
+                    }
+                    
+                    // We'll handle scene loading through our dedicated coroutine
+                }
+            }
+        }
+    }
+    
+    private void OnTransportFailure()
+    {
+        Debug.LogError("Network transport failure detected!");
+        
+        // If we're in the lobby and a transport failure occurs, try to handle it gracefully
+        if (lobbyPanel != null && lobbyPanel.activeSelf)
+        {
+            // Show error message to user
+            if (countdownText != null)
+            {
+                countdownText.text = "Connection failed!";
+                countdownText.color = Color.red;
+            }
+            
+            // Re-enable the start button if we're the host
+            if (IsLobbyHost() && startGameButton != null)
+            {
+                startGameButton.interactable = true;
+            }
+            else
+            {
+                // For clients, we might want to show a rejoin button or return to main menu
+                Debug.Log("Client experiencing transport failure, consider returning to main menu");
+                // Could show a button to return to main menu here
+            }
+        }
+    }
+    
+    // Simple coroutine to check and load the game scene for clients
+    private System.Collections.IEnumerator CheckAndLoadGameScene()
+    {
+        Debug.Log("Starting client scene transition check");
+        float startTime = Time.realtimeSinceStartup;
+        float timeout = 10f; // Max time to wait before forcing scene load
+        bool sceneLoaded = false;
+        
+        while (Time.realtimeSinceStartup - startTime < timeout && !sceneLoaded)
+        {
+            // Check if we're already in the Game scene
+            if (UnityEngine.SceneManagement.SceneManager.GetActiveScene().name == "Game")
+            {
+                Debug.Log("Already in Game scene - no action needed");
+                sceneLoaded = true;
+                break;
+            }
+            
+            // Check if we're still connected as a client
+            if (NetworkManager.Singleton == null || !NetworkManager.Singleton.IsConnectedClient)
+            {
+                Debug.LogWarning("Client disconnected during scene transition");
+                if (countdownText != null)
+                {
+                    countdownText.text = "Connection lost!";
+                    countdownText.color = Color.red;
+                }
+                yield break;
+            }
+            
+            // Update UI to show we're still waiting
+            if (countdownText != null)
+            {
+                countdownText.text = $"Game starting... {Mathf.Round(timeout - (Time.realtimeSinceStartup - startTime))}s";
+            }
+            
+            // Give a short wait between checks
+            yield return new WaitForSeconds(0.5f);
+        }
+        
+        // If we've timed out and scene still hasn't loaded, force it
+        if (!sceneLoaded)
+        {
+            Debug.LogWarning("CLIENT SCENE TRANSITION TIMED OUT! Forcing scene load.");
+            
+            // Force preserve critical objects before loading scene
+            PreserveNetworkObjects();
+            
+            try
+            {
+                // Critical part: Force load the game scene directly
+                Debug.Log("Manually loading Game scene for client after timeout");
+                UnityEngine.SceneManagement.SceneManager.LoadScene("Game");
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"Error loading game scene: {e.Message}");
+                if (countdownText != null)
+                {
+                    countdownText.text = "Failed to join game!";
+                    countdownText.color = Color.red;
+                }
+            }
+        }
+    }
+    
+    // Method for handling DontDestroyOnLoad objects
+    private void PreserveNetworkObjects()
+    {
+        // Ensure NetworkManager persists across scene changes
+        if (NetworkManager.Singleton != null)
+        {
+            Debug.Log("Preserving NetworkManager for scene transition");
+            DontDestroyOnLoad(NetworkManager.Singleton.gameObject);
+        }
+        
+        // Ensure NetworkManagerUI persists across scene changes
+        if (NetworkManagerUI.Instance != null)
+        {
+            Debug.Log("Preserving NetworkManagerUI for scene transition");
+            DontDestroyOnLoad(NetworkManagerUI.Instance.gameObject);
+            
+            // The NetworkManagerUI handles character selections, so make sure it stays active
+            NetworkManagerUI.Instance.gameObject.SetActive(true);
+        }
+        else
+        {
+            Debug.LogWarning("NetworkManagerUI.Instance not found! Player spawning might fail.");
         }
     }
 
@@ -735,6 +1109,23 @@ public class LobbyManager : MonoBehaviour
         // Delay between retries (in milliseconds)
         const int retryDelayMs = 1000;
         
+        // Get the transport component once outside the loop
+        var transport = NetworkManager.Singleton.GetComponent<Unity.Netcode.Transports.UTP.UnityTransport>();
+        if (transport == null)
+        {
+            Debug.LogError("Failed to find Unity Transport component");
+            return false;
+        }
+        
+        // First, check if we already have valid relay data (e.g., from a previous successful join)
+        if (!string.IsNullOrEmpty(transport.ConnectionData.Address) && 
+            transport.ConnectionData.Address != "0.0.0.0" && 
+            transport.ConnectionData.Port != 0)
+        {
+            Debug.Log("Client already has valid connection data configured, skipping relay join");
+            return true;
+        }
+        
         for (int attempt = 0; attempt < maxRetries; attempt++)
         {
             try
@@ -756,32 +1147,40 @@ public class LobbyManager : MonoBehaviour
                 Debug.Log($"Successfully joined Relay allocation with ID: {joinAllocation.AllocationId}");
                 
                 // Set up client's network transport with Relay
-                var transport = NetworkManager.Singleton.GetComponent<Unity.Netcode.Transports.UTP.UnityTransport>();
-                
-                if (transport != null)
-                {
-                    transport.SetClientRelayData(
-                        joinAllocation.RelayServer.IpV4,
-                        (ushort)joinAllocation.RelayServer.Port,
-                        joinAllocation.AllocationIdBytes,
-                        joinAllocation.Key,
-                        joinAllocation.ConnectionData,
-                        joinAllocation.HostConnectionData
-                    );
+                transport.SetClientRelayData(
+                    joinAllocation.RelayServer.IpV4,
+                    (ushort)joinAllocation.RelayServer.Port,
+                    joinAllocation.AllocationIdBytes,
+                    joinAllocation.Key,
+                    joinAllocation.ConnectionData,
+                    joinAllocation.HostConnectionData
+                );
 
-                    Debug.Log("Successfully configured client relay data");
-                    return true;
-                }
-                
-                Debug.LogError("Failed to find Unity Transport component");
-                return false;
+                Debug.Log($"Successfully configured client relay data: {joinAllocation.RelayServer.IpV4}:{joinAllocation.RelayServer.Port}");
+                return true;
             }
             catch (System.Exception e)
             {
-                // On last attempt, log error and return false
+                // On last attempt, try a more specific error message based on the exception
                 if (attempt == maxRetries - 1)
                 {
-                    Debug.LogError($"Failed to join Relay with code '{relayCode}' after {maxRetries} attempts: {e.Message}");
+                    string errorMessage = e.Message;
+                    
+                    // Check for common error patterns
+                    if (errorMessage.Contains("join code not found"))
+                    {
+                        Debug.LogError($"Relay join code '{relayCode}' is no longer valid or has expired. The host may need to create a new relay code.");
+                    }
+                    else if (errorMessage.Contains("allocation ID not found"))
+                    {
+                        Debug.LogError($"Relay allocation no longer exists. The host may have disconnected or the allocation expired.");
+                    }
+                    else
+                    {
+                        Debug.LogError($"Failed to join Relay with code '{relayCode}' after {maxRetries} attempts: {errorMessage}");
+                    }
+                    
+                    // At this point we could try a direct connection instead, but we'd need the host's IP
                     return false;
                 }
                 
@@ -790,7 +1189,6 @@ public class LobbyManager : MonoBehaviour
             }
         }
         
-        // This should never be reached due to the return in the last catch block, but added for safety
         return false;
     }
 
@@ -819,9 +1217,42 @@ public class LobbyManager : MonoBehaviour
                 string relayCode = joinedLobby.Data["RelayCode"].Value;
                 Debug.Log($"Found Relay code in joined lobby: {relayCode}");
                 
+                // Check if the relay code is potentially expired (more than 60 seconds old)
+                bool potentiallyExpired = false;
+                if (joinedLobby.Data.ContainsKey("RelayTimestamp"))
+                {
+                    string timestampStr = joinedLobby.Data["RelayTimestamp"].Value;
+                    if (long.TryParse(timestampStr, out long timestamp))
+                    {
+                        long now = System.DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                        long ageInSeconds = now - timestamp;
+                        Debug.Log($"Relay code age: {ageInSeconds} seconds");
+                        
+                        // If code is more than 60 seconds old, it might be expired
+                        if (ageInSeconds > 60)
+                        {
+                            potentiallyExpired = true;
+                            Debug.LogWarning("Relay code might be expired. Requesting host to refresh relay code.");
+                        }
+                    }
+                }
+                
                 // Try joining the Relay
                 bool relayJoined = await JoinRelay(relayCode);
-                if (!relayJoined)
+                
+                // If join failed and code might be expired, request a refresh from host
+                if (!relayJoined && potentiallyExpired)
+                {
+                    Debug.LogWarning("Failed to join with expired relay code. Using direct connection instead.");
+                    
+                    // For now, proceed with lobby join but no relay
+                    // In a production app, you could implement a relay code refresh mechanism here
+                    // such as a ClientRPC call or custom lobby data update
+                    
+                    ShowLobbyUI();
+                    return;
+                }
+                else if (!relayJoined)
                 {
                     Debug.LogError("Failed to join Relay after joining lobby by code");
                     await LeaveLobby();
