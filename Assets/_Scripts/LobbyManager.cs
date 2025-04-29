@@ -473,11 +473,13 @@ public class LobbyManager : MonoBehaviour
             for (int i = 5; i >= 1; i--)
             {
                 countdownText.text = i.ToString();
+                Debug.Log($"Game starting in {i}...");
                 yield return new WaitForSeconds(1f);
             }
             
             // Show "Starting..." message
             countdownText.text = "Starting...";
+            Debug.Log("Game starting now!");
         }
         else
         {
@@ -491,27 +493,38 @@ public class LobbyManager : MonoBehaviour
             foreach (Player player in joinedLobby.Players)
             {
                 int characterIndex = GetCharacterIndexFromLobbyPlayer(player);
-                ulong clientId = ulong.Parse(player.Id);
-                NetworkManagerUI.Instance.UpdateCharacterSelection(clientId, characterIndex);
+                
+                // Parse player ID to client ID - use try-catch to handle potential parsing errors
+                try
+                {
+                    ulong clientId = ulong.Parse(player.Id);
+                    NetworkManagerUI.Instance.UpdateCharacterSelection(clientId, characterIndex);
+                    Debug.Log($"Updated character selection for player {player.Id} to character {characterIndex}");
+                }
+                catch (System.Exception e)
+                {
+                    Debug.LogError($"Failed to parse player ID {player.Id} to client ID: {e.Message}");
+                }
             }
         }
 
-        // Start as host if we're the host
+        // Start networking based on role (host or client)
         if (IsLobbyHost() && NetworkManager.Singleton != null)
         {
             Debug.Log("Starting as host...");
             NetworkManager.Singleton.StartHost();
+            
+            // Load the game scene - this will be handled by NetworkManager now
+            // This will automatically synchronize to all connected clients
+            NetworkManager.Singleton.SceneManager.LoadScene("Game", UnityEngine.SceneManagement.LoadSceneMode.Single);
         }
         else if (!IsLobbyHost() && NetworkManager.Singleton != null)
         {
             Debug.Log("Starting as client...");
             NetworkManager.Singleton.StartClient();
-        }
-
-        // Load the game scene - this will be handled by NetworkManager now
-        if (IsLobbyHost())
-        {
-            NetworkManager.Singleton.SceneManager.LoadScene("Game", UnityEngine.SceneManagement.LoadSceneMode.Single);
+            
+            // The host will handle scene loading for clients through NetworkManager's scene management
+            Debug.Log("Waiting for host to load the game scene...");
         }
     }
 
