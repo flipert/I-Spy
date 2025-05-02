@@ -29,6 +29,32 @@ public class PlayerSpawner : MonoBehaviour
             return;
         }
 
+        // Make sure we have a fallback player prefab
+        if (fallbackPlayerPrefab == null)
+        {
+            // Try to load a default player prefab from Resources
+            fallbackPlayerPrefab = Resources.Load<GameObject>("PlayerPrefabs/DefaultPlayer");
+            
+            if (fallbackPlayerPrefab == null)
+            {
+                // Last resort - try to load any player prefab we can find
+                GameObject[] playerPrefabs = Resources.LoadAll<GameObject>("PlayerPrefabs");
+                if (playerPrefabs != null && playerPrefabs.Length > 0)
+                {
+                    fallbackPlayerPrefab = playerPrefabs[0];
+                    Debug.Log("PlayerSpawner: Loaded first available player prefab as fallback: " + fallbackPlayerPrefab.name);
+                }
+                else
+                {
+                    Debug.LogWarning("PlayerSpawner: Could not find any player prefabs in Resources! Player spawning may fail.");
+                }
+            }
+            else
+            {
+                Debug.Log("PlayerSpawner: Loaded DefaultPlayer prefab as fallback.");
+            }
+        }
+
         // Setup event listeners
         NetworkManager.Singleton.OnClientConnectedCallback += OnClientConnected;
         SceneManager.sceneLoaded += OnSceneLoaded;

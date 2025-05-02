@@ -898,7 +898,40 @@ public class LobbyManager : MonoBehaviour
         }
         else
         {
-            Debug.LogWarning("NetworkManagerUI.Instance not found! Player spawning might fail.");
+            Debug.LogError("NetworkManagerUI.Instance not found! Creating NetworkManagerUI...");
+            
+            // Try to instantiate NetworkManagerUI from prefab if it doesn't exist
+            GameObject networkManagerUIPrefab = Resources.Load<GameObject>("Prefabs/NetworkManagerUI");
+            if (networkManagerUIPrefab != null)
+            {
+                GameObject instantiated = Instantiate(networkManagerUIPrefab);
+                DontDestroyOnLoad(instantiated);
+                Debug.Log("Created NetworkManagerUI from prefab");
+            }
+            else
+            {
+                Debug.LogError("Failed to load NetworkManagerUI prefab from Resources/Prefabs/NetworkManagerUI!");
+            }
+        }
+        
+        // Ensure GameManager persists or will be created
+        if (GameManager.Instance != null)
+        {
+            Debug.Log("Preserving GameManager for scene transition");
+            DontDestroyOnLoad(GameManager.Instance.gameObject);
+        }
+        else
+        {
+            Debug.LogWarning("GameManager.Instance not found! The Game scene should include a GameManager.");
+            
+            // Try to instantiate GameManager from prefab if it doesn't exist
+            GameObject gameManagerPrefab = Resources.Load<GameObject>("Prefabs/GameManager");
+            if (gameManagerPrefab != null)
+            {
+                GameObject instantiated = Instantiate(gameManagerPrefab);
+                DontDestroyOnLoad(instantiated);
+                Debug.Log("Created GameManager from prefab");
+            }
         }
     }
 

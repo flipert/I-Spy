@@ -252,7 +252,28 @@ public class PlayerController : NetworkBehaviour
             hudController = FindObjectOfType<PlayerHUDController>();
             if (hudController == null)
             {
-                Debug.LogError("PlayerController: Could not find PlayerHUDController in the scene!");
+                Debug.Log("PlayerController: Attempting to create PlayerHUDController since it wasn't found in the scene");
+                
+                // Try to instantiate PlayerHUDController from prefab
+                GameObject hudPrefab = Resources.Load<GameObject>("Prefabs/PlayerHUD");
+                if (hudPrefab != null)
+                {
+                    GameObject hudObject = Instantiate(hudPrefab);
+                    hudController = hudObject.GetComponent<PlayerHUDController>();
+                    if (hudController != null)
+                    {
+                        Debug.Log("PlayerController: Successfully created PlayerHUDController from prefab");
+                        hudController.Initialize();
+                    }
+                    else
+                    {
+                        Debug.LogError("PlayerController: Failed to get PlayerHUDController component from instantiated prefab");
+                    }
+                }
+                else
+                {
+                    Debug.LogError("PlayerController: Could not find PlayerHUDController prefab in Resources/Prefabs/PlayerHUD");
+                }
             }
             else
             {
@@ -276,7 +297,39 @@ public class PlayerController : NetworkBehaviour
             }
             else
             {
-                Debug.LogError("PlayerController: GameManager.Instance is null! Make sure a GameManager exists in the scene.");
+                Debug.Log("PlayerController: Attempting to find or create GameManager since it wasn't found");
+                
+                // First try to find it - maybe it exists but the reference wasn't set up
+                GameManager gameManager = FindObjectOfType<GameManager>();
+                if (gameManager != null)
+                {
+                    gameManager.RegisterPlayer(this);
+                    Debug.Log("PlayerController: Found existing GameManager and registered player");
+                }
+                else
+                {
+                    // Try to instantiate GameManager from prefab
+                    GameObject gmPrefab = Resources.Load<GameObject>("Prefabs/GameManager");
+                    if (gmPrefab != null)
+                    {
+                        GameObject gmObject = Instantiate(gmPrefab);
+                        DontDestroyOnLoad(gmObject);
+                        gameManager = gmObject.GetComponent<GameManager>();
+                        if (gameManager != null)
+                        {
+                            gameManager.RegisterPlayer(this);
+                            Debug.Log("PlayerController: Created GameManager from prefab and registered player");
+                        }
+                        else
+                        {
+                            Debug.LogError("PlayerController: Failed to get GameManager component from instantiated prefab");
+                        }
+                    }
+                    else
+                    {
+                        Debug.LogError("PlayerController: Could not find GameManager prefab in Resources/Prefabs/GameManager");
+                    }
+                }
             }
         }
 
