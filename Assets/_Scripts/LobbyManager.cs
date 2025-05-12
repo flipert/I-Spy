@@ -139,7 +139,12 @@ public class LobbyManager : MonoBehaviour
                     {
                         Debug.Log("<color=yellow>Host has started the game! Starting countdown...</color>");
                         isGameStarting = true;
-                        activeCountdownCoroutine = StartCoroutine(StartGameCountdown());
+                        
+                        // Only start countdown if we're not the host (host already started it directly)
+                        if (!IsLobbyHost())
+                        {
+                            activeCountdownCoroutine = StartCoroutine(StartGameCountdown());
+                        }
                     }
                     
                     // Update our local copy of the lobby
@@ -405,18 +410,38 @@ public class LobbyManager : MonoBehaviour
         }
     }
 
+    [Header("UI Transitions")]
+    [SerializeField] private float uiTransitionDuration = 0.3f;
+    
     // --- UI Management ---
     private void ShowMainMenuUI()
     {
-        if (mainMenuPanel) mainMenuPanel.SetActive(true);
-        if (lobbyPanel) lobbyPanel.SetActive(false);
+        // Fade out other panels first
+        if (lobbyPanel && lobbyPanel.activeSelf)
+            UIFadeUtility.FadeOut(this, lobbyPanel, uiTransitionDuration);
+            
+        if (lobbyBrowserPanel && lobbyBrowserPanel.activeSelf)
+            UIFadeUtility.FadeOut(this, lobbyBrowserPanel, uiTransitionDuration);
+        
+        // Fade in main menu panel
+        if (mainMenuPanel)
+            UIFadeUtility.FadeIn(this, mainMenuPanel, uiTransitionDuration);
     }
 
     private void ShowLobbyUI()
     {
-        if (mainMenuPanel) mainMenuPanel.SetActive(false);
-        if (lobbyPanel) lobbyPanel.SetActive(true);
-        if (lobbyBrowserPanel) lobbyBrowserPanel.SetActive(false); // Hide the lobby browser panel
+        // Fade out other panels
+        if (mainMenuPanel && mainMenuPanel.activeSelf)
+            UIFadeUtility.FadeOut(this, mainMenuPanel, uiTransitionDuration);
+            
+        if (lobbyBrowserPanel && lobbyBrowserPanel.activeSelf)
+            UIFadeUtility.FadeOut(this, lobbyBrowserPanel, uiTransitionDuration);
+        
+        // Fade in lobby panel
+        if (lobbyPanel)
+            UIFadeUtility.FadeIn(this, lobbyPanel, uiTransitionDuration);
+            
+        // Hide the lobby browser panel - with fade if visible
 
         if (lobbyCodeText != null && joinedLobby != null)
         {
@@ -561,6 +586,9 @@ public class LobbyManager : MonoBehaviour
         }
     }
 
+    // Flag to track if countdown overlay is currently active/visible
+    private bool isCountdownOverlayActive = false;
+    
     // Method for the cancel button to call
     public void CancelGameCountdown()
     {
@@ -571,12 +599,13 @@ public class LobbyManager : MonoBehaviour
         }
         
         countdownCancelled = true;
+        isCountdownOverlayActive = false;
         Debug.Log("Game countdown cancelled by user.");
         
-        // Hide the overlay
+        // Hide the overlay with fade out
         if (countdownOverlay != null)
         {
-            countdownOverlay.SetActive(false);
+            UIFadeUtility.FadeOut(this, countdownOverlay, 0.3f);
         }
         
         // Re-enable the start button
@@ -610,11 +639,14 @@ public class LobbyManager : MonoBehaviour
         
         Debug.Log("Starting game countdown...");
         
-        // Show and initialize countdown overlay
-        if (countdownOverlay != null)
+        // Show and initialize countdown overlay - but only if it's not already active
+        if (countdownOverlay != null && !isCountdownOverlayActive)
         {
-            // Activate the overlay
-            countdownOverlay.SetActive(true);
+            // Mark the overlay as active to prevent double activation
+            isCountdownOverlayActive = true;
+            
+            // Activate the overlay with a smooth fade
+            UIFadeUtility.FadeIn(this, countdownOverlay, 0.3f);
             
             // Reset text color if it was previously set to red for errors
             if (countdownText != null)
@@ -662,6 +694,15 @@ public class LobbyManager : MonoBehaviour
             {
                 countdownText.text = "Starting...";
             }
+            
+            // Wait briefly before proceeding
+            yield return new WaitForSeconds(1f);
+            
+            // Fade out the overlay at the end of the countdown
+            UIFadeUtility.FadeOut(this, countdownOverlay, 0.3f, () => {
+                // Reset the overlay state when fade out is complete
+                isCountdownOverlayActive = false;
+            });
         }
         else
         {
@@ -1172,11 +1213,17 @@ public class LobbyManager : MonoBehaviour
 
     private void ShowLobbyBrowserUI()
     {
-        if (mainMenuPanel) mainMenuPanel.SetActive(false);
-        if (lobbyPanel) lobbyPanel.SetActive(false);
-        if (lobbyBrowserPanel) 
+        // Fade out other panels
+        if (mainMenuPanel && mainMenuPanel.activeSelf)
+            UIFadeUtility.FadeOut(this, mainMenuPanel, uiTransitionDuration);
+            
+        if (lobbyPanel && lobbyPanel.activeSelf)
+            UIFadeUtility.FadeOut(this, lobbyPanel, uiTransitionDuration);
+            
+        // Fade in lobby browser panel
+        if (lobbyBrowserPanel)
         {
-            lobbyBrowserPanel.SetActive(true);
+            UIFadeUtility.FadeIn(this, lobbyBrowserPanel, uiTransitionDuration);
             
             // Wire up refresh button
             if (refreshLobbiesButton)

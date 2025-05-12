@@ -316,6 +316,13 @@ public class ButtonCharacterSelect : MonoBehaviour
             playerNameText.text = playerName;
     }
     
+    [Header("Transition Settings")]
+    [SerializeField] private float fadeInDuration = 0.25f;
+    [SerializeField] private float fadeOutDuration = 0.15f;
+    
+    // Active fade coroutine reference for cancellation if needed
+    private Coroutine activeFadeCoroutine = null;
+    
     private void UpdateVisualState()
     {
         // Coming Soon state takes priority
@@ -325,13 +332,29 @@ public class ButtonCharacterSelect : MonoBehaviour
             if (button != null)
                 button.interactable = false;
                 
-            // Show Coming Soon state
+            // Show Coming Soon state with fade
             if (stateComingSoon != null)
-                stateComingSoon.SetActive(true);
-                
-            // Hide Selected state
-            if (stateSelected != null)
-                stateSelected.SetActive(false);
+            {
+                // Cancel any active fades
+                if (activeFadeCoroutine != null)
+                    StopCoroutine(activeFadeCoroutine);
+                    
+                // If the selected state is showing, fade it out first
+                if (stateSelected != null && stateSelected.activeSelf)
+                {
+                    UIFadeUtility.FadeOut(this, stateSelected, fadeOutDuration, () => {
+                        // After selected state is faded out, fade in coming soon state
+                        if (!stateComingSoon.activeSelf)
+                            activeFadeCoroutine = UIFadeUtility.FadeIn(this, stateComingSoon, fadeInDuration);
+                    });
+                }
+                else
+                {
+                    // Just fade in coming soon state
+                    if (!stateComingSoon.activeSelf)
+                        activeFadeCoroutine = UIFadeUtility.FadeIn(this, stateComingSoon, fadeInDuration);
+                }
+            }
                 
             return;
         }
@@ -342,11 +365,39 @@ public class ButtonCharacterSelect : MonoBehaviour
             
         // Show/hide selected state based on selection status
         if (stateSelected != null)
-            stateSelected.SetActive(selectedByClientId.HasValue);
+        {
+            bool shouldBeSelected = selectedByClientId.HasValue;
+            bool isCurrentlySelected = stateSelected.activeSelf;
             
-        // Hide coming soon state
-        if (stateComingSoon != null)
-            stateComingSoon.SetActive(false);
+            // Only update if there's a change needed
+            if (shouldBeSelected != isCurrentlySelected)
+            {
+                // Cancel any active fades
+                if (activeFadeCoroutine != null)
+                    StopCoroutine(activeFadeCoroutine);
+                    
+                if (shouldBeSelected)
+                {
+                    // Fade in selected state
+                    activeFadeCoroutine = UIFadeUtility.FadeIn(this, stateSelected, fadeInDuration);
+                    
+                    // If coming soon state is active, fade it out
+                    if (stateComingSoon != null && stateComingSoon.activeSelf)
+                        UIFadeUtility.FadeOut(this, stateComingSoon, fadeOutDuration);
+                }
+                else
+                {
+                    // Fade out selected state
+                    activeFadeCoroutine = UIFadeUtility.FadeOut(this, stateSelected, fadeOutDuration);
+                }
+            }
+        }
+            
+        // Hide coming soon state if not already hidden
+        if (stateComingSoon != null && stateComingSoon.activeSelf && !isComingSoon)
+        {
+            UIFadeUtility.FadeOut(this, stateComingSoon, fadeOutDuration);
+        }
             
         // Show/hide kick button based on if we're the host and this is selected by another client
         UpdateKickButtonVisibility();
