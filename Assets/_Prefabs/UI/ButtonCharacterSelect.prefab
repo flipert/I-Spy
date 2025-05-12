@@ -961,7 +961,19 @@ MonoBehaviour:
   m_TargetGraphic: {fileID: 8292441739547818743}
   m_OnClick:
     m_PersistentCalls:
-      m_Calls: []
+      m_Calls:
+      - m_Target: {fileID: 880356301270501760}
+        m_TargetAssemblyTypeName: ButtonCharacterSelect, Assembly-CSharp
+        m_MethodName: OnButtonClicked
+        m_Mode: 1
+        m_Arguments:
+          m_ObjectArgument: {fileID: 0}
+          m_ObjectArgumentAssemblyTypeName: UnityEngine.Object, UnityEngine
+          m_IntArgument: 0
+          m_FloatArgument: 0
+          m_StringArgument: 
+          m_BoolArgument: 0
+        m_CallState: 2
 --- !u!114 &5517541149258294149
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -990,12 +1002,13 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   characterIndex: 0
-  isComingSoon: 0
   stateSelected: {fileID: 7151182701883681863}
   stateComingSoon: {fileID: 6089719495637752142}
   button: {fileID: 2642193702558048056}
   playerNameText: {fileID: 8578544578330767044}
   kickButton: {fileID: 8014581212206713532}
+  fadeInDuration: 0.25
+  fadeOutDuration: 0.15
 --- !u!1 &6089719495637752142
 GameObject:
   m_ObjectHideFlags: 0

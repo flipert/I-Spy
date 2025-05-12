@@ -70,24 +70,32 @@ public class ButtonCharacterSelect : MonoBehaviour
     
     public void OnButtonClicked()
     {
+        Debug.Log($"[ButtonCharacterSelect] Button clicked for character {characterIndex}, isComingSoon: {isComingSoon}, selectedByClientId: {(selectedByClientId.HasValue ? selectedByClientId.Value.ToString() : "none")}");
+
         // If coming soon, the button shouldn't be clickable
         if (isComingSoon)
+        {
+            Debug.Log($"[ButtonCharacterSelect] Character {characterIndex} is marked as coming soon. Ignoring click.");
             return;
+        }
             
         // If we're not connected to NetworkManager, just update visual state (for testing in editor)
         if (NetworkManager.Singleton == null || !NetworkManager.Singleton.IsClient)
         {
+            Debug.Log($"[ButtonCharacterSelect] No NetworkManager or not a client. Using local character selection for character {characterIndex}.");
             SelectLocalCharacter();
             return;
         }
         
         // If already selected by this client, don't do anything
         if (selectedByClientId.HasValue && selectedByClientId.Value == NetworkManager.Singleton.LocalClientId)
+        {
+            Debug.Log($"[ButtonCharacterSelect] Character {characterIndex} is already selected by this client {NetworkManager.Singleton.LocalClientId}. Ignoring click.");
             return;
-            
-        // If selected by another client, don't allow selection
-        if (selectedByClientId.HasValue && selectedByClientId.Value != NetworkManager.Singleton.LocalClientId)
-            return;
+        }
+        
+        // Allow selection even if selected by another client - we'll handle the reassignment
+        // Removed the check that prevented this
             
         // Use the manager to handle selection - this will deselect any previously selected character
         SelectLocalCharacter();
@@ -98,9 +106,31 @@ public class ButtonCharacterSelect : MonoBehaviour
         // For non-networked testing
         if (NetworkManager.Singleton == null || !NetworkManager.Singleton.IsClient)
         {
-            // Just toggle selection if not networked
-            bool isCurrentlySelected = selectedByClientId.HasValue;
-            selectedByClientId = isCurrentlySelected ? null : (ulong?)999; // Use dummy ID for testing
+            Debug.Log($"[ButtonCharacterSelect] Using local selection for character {characterIndex} in non-networked mode");
+            
+            // First deselect all other characters to ensure only one is selected at a time
+            if (CharacterSelectionManager.Instance != null)
+            {
+                // Use the manager to deselect previous characters
+                CharacterSelectionManager.Instance.DeselectAllCharactersExcept(this);
+            }
+            else
+            {
+                // Manual fallback: Find all other character buttons and deselect them
+                ButtonCharacterSelect[] allButtons = FindObjectsOfType<ButtonCharacterSelect>();
+                foreach (var button in allButtons)
+                {
+                    if (button != this && button.IsSelected())
+                    {
+                        Debug.Log($"[ButtonCharacterSelect] Deselecting character {button.CharacterIndex} before selecting {characterIndex}");
+                        button.DeselectCharacter();
+                    }
+                }
+            }
+            
+            // Now select this character
+            Debug.Log($"[ButtonCharacterSelect] Selecting character {characterIndex} locally");
+            selectedByClientId = (ulong?)999; // Use dummy ID for testing
             UpdateVisualState();
             return;
         }
@@ -108,14 +138,16 @@ public class ButtonCharacterSelect : MonoBehaviour
         // Inform the CharacterSelectionManager about this selection
         if (CharacterSelectionManager.Instance != null)
         {
+            Debug.Log($"[ButtonCharacterSelect] Requesting CharacterSelectionManager to select character {characterIndex} for client {NetworkManager.Singleton.LocalClientId}");
+            
             // This will handle deselecting previous character and update the selection
             CharacterSelectionManager.Instance.SelectCharacter(NetworkManager.Singleton.LocalClientId, this);
-            Debug.Log($"[ButtonCharacterSelect] Selected character {characterIndex} for client {NetworkManager.Singleton.LocalClientId}");
         }
         else
         {
+            Debug.LogError($"[ButtonCharacterSelect] No CharacterSelectionManager found! Cannot properly coordinate character selection for character {characterIndex}.");
+            
             // Fallback if no manager (shouldn't happen in production)
-            Debug.LogWarning("[ButtonCharacterSelect] No CharacterSelectionManager found! Cannot properly coordinate character selection.");
             selectedByClientId = NetworkManager.Singleton.LocalClientId;
             UpdateVisualState();
             
@@ -123,6 +155,11 @@ public class ButtonCharacterSelect : MonoBehaviour
             if (NetworkManagerUI.Instance != null)
             {
                 NetworkManagerUI.Instance.SelectCharacter(characterIndex);
+                Debug.Log($"[ButtonCharacterSelect] Notified NetworkManagerUI about selection of character {characterIndex}");
+            }
+            else
+            {
+                Debug.LogError("[ButtonCharacterSelect] NetworkManagerUI Instance is null! Cannot notify about character selection.");
             }
         }
     }
@@ -168,7 +205,7 @@ public class ButtonCharacterSelect : MonoBehaviour
     // Active fade coroutine reference for cancellation if needed
     private Coroutine activeFadeCoroutine = null;
     
-    private void UpdateVisualState()
+    public void UpdateVisualState()
     {
         // Check if this GameObject is active before attempting to start coroutines
         if (!isActiveAndEnabled)
@@ -177,9 +214,17 @@ public class ButtonCharacterSelect : MonoBehaviour
             return;
         }
         
+        Debug.Log($"[ButtonCharacterSelect] Updating visual state for character {characterIndex}. IsComingSoon: {isComingSoon}, IsSelected: {selectedByClientId.HasValue}");
+        
+        // Ensure CanvasGroup components exist on state objects
+        EnsureCanvasGroup(stateSelected);
+        EnsureCanvasGroup(stateComingSoon);
+        
         // Coming Soon state takes priority
         if (isComingSoon)
         {
+            Debug.Log($"[ButtonCharacterSelect] Character {characterIndex} is coming soon. Showing coming soon state.");
+            
             // Disable button interactivity
             if (button != null)
                 button.interactable = false;
@@ -194,17 +239,30 @@ public class ButtonCharacterSelect : MonoBehaviour
                 // If the selected state is showing, fade it out first
                 if (stateSelected != null && stateSelected.activeSelf)
                 {
+                    Debug.Log($"[ButtonCharacterSelect] Fading out selected state for character {characterIndex} before showing coming soon state");
                     UIFadeUtility.FadeOut(this, stateSelected, fadeOutDuration, () => {
                         // After selected state is faded out, fade in coming soon state
                         if (!stateComingSoon.activeSelf)
+                        {
+                            Debug.Log($"[ButtonCharacterSelect] Fading in coming soon state for character {characterIndex}");
+                            CanvasGroup cg = stateComingSoon.GetComponent<CanvasGroup>();
+                            if (cg != null) cg.alpha = 0f; // Ensure starting at 0 alpha
+                            stateComingSoon.SetActive(true); // Ensure it's active
                             activeFadeCoroutine = UIFadeUtility.FadeIn(this, stateComingSoon, fadeInDuration);
+                        }
                     });
                 }
                 else
                 {
                     // Just fade in coming soon state
                     if (!stateComingSoon.activeSelf)
+                    {
+                        Debug.Log($"[ButtonCharacterSelect] Fading in coming soon state for character {characterIndex}");
+                        CanvasGroup cg = stateComingSoon.GetComponent<CanvasGroup>();
+                        if (cg != null) cg.alpha = 0f; // Ensure starting at 0 alpha
+                        stateComingSoon.SetActive(true); // Ensure it's active
                         activeFadeCoroutine = UIFadeUtility.FadeIn(this, stateComingSoon, fadeInDuration);
+                    }
                 }
             }
                 
@@ -221,6 +279,8 @@ public class ButtonCharacterSelect : MonoBehaviour
             bool shouldBeSelected = selectedByClientId.HasValue;
             bool isCurrentlySelected = stateSelected.activeSelf;
             
+            Debug.Log($"[ButtonCharacterSelect] Character {characterIndex}: shouldBeSelected={shouldBeSelected}, isCurrentlySelected={isCurrentlySelected}");
+            
             // Only update if there's a change needed
             if (shouldBeSelected != isCurrentlySelected)
             {
@@ -230,6 +290,12 @@ public class ButtonCharacterSelect : MonoBehaviour
                     
                 if (shouldBeSelected)
                 {
+                    Debug.Log($"[ButtonCharacterSelect] Fading in selected state for character {characterIndex}");
+                    // Set up initial state before fading in
+                    CanvasGroup cg = stateSelected.GetComponent<CanvasGroup>();
+                    if (cg != null) cg.alpha = 0f; // Ensure starting at 0 alpha
+                    stateSelected.SetActive(true); // Activate before fade
+                    
                     // Fade in selected state
                     activeFadeCoroutine = UIFadeUtility.FadeIn(this, stateSelected, fadeInDuration);
                     
@@ -239,12 +305,13 @@ public class ButtonCharacterSelect : MonoBehaviour
                 }
                 else
                 {
+                    Debug.Log($"[ButtonCharacterSelect] Fading out selected state for character {characterIndex}");
                     // Fade out selected state
                     activeFadeCoroutine = UIFadeUtility.FadeOut(this, stateSelected, fadeOutDuration);
                 }
             }
         }
-            
+        
         // Hide coming soon state if not already hidden
         if (stateComingSoon != null && stateComingSoon.activeSelf && !isComingSoon)
         {
@@ -253,6 +320,18 @@ public class ButtonCharacterSelect : MonoBehaviour
             
         // Show/hide kick button based on if we're the host and this is selected by another client
         UpdateKickButtonVisibility();
+    }
+    
+    // Helper method to ensure a GameObject has a CanvasGroup component
+    private void EnsureCanvasGroup(GameObject gameObject)
+    {
+        if (gameObject == null) return;
+        
+        if (gameObject.GetComponent<CanvasGroup>() == null)
+        {
+            CanvasGroup canvasGroup = gameObject.AddComponent<CanvasGroup>();
+            Debug.Log($"[ButtonCharacterSelect] Added missing CanvasGroup to {gameObject.name}");
+        }
     }
     
     private void UpdateKickButtonVisibility()
