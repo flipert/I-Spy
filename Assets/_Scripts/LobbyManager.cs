@@ -20,7 +20,10 @@ public class LobbyManager : MonoBehaviour
     [SerializeField] private Button startGameButton; // Drag your StartGameButton here
     [SerializeField] private Button leaveLobbyButton; // Drag your LeaveLobbyButton here
     [SerializeField] private TMPro.TextMeshProUGUI lobbyCodeText; // Drag LobbyCodeText here
-    [SerializeField] private TMPro.TextMeshProUGUI countdownText; // Add reference to countdown text
+    [Header("Countdown Overlay")]
+    [SerializeField] private GameObject countdownOverlay; // The full-screen overlay for countdown
+    [SerializeField] private TMPro.TextMeshProUGUI countdownText; // Text element within the overlay
+    [SerializeField] private Button cancelCountdownButton; // Button to cancel the countdown
 
     [Header("Lobby Browser UI")]
     [SerializeField] private GameObject lobbyBrowserPanel; // Panel to show available lobbies
@@ -136,7 +139,7 @@ public class LobbyManager : MonoBehaviour
                     {
                         Debug.Log("<color=yellow>Host has started the game! Starting countdown...</color>");
                         isGameStarting = true;
-                        StartCoroutine(StartGameCountdown());
+                        activeCountdownCoroutine = StartCoroutine(StartGameCountdown());
                     }
                     
                     // Update our local copy of the lobby
@@ -313,6 +316,10 @@ public class LobbyManager : MonoBehaviour
     // Store failure count as a field instead of passing by ref
     private int heartbeatFailureCount = 0;
     private readonly int MAX_HEARTBEAT_FAILURES = 5;
+    
+    // Countdown state tracking
+    private bool countdownCancelled = false;
+    private Coroutine activeCountdownCoroutine = null;
     
     private void SendHeartbeat(string lobbyId, ref int failureCount, int maxFailures)
     {
@@ -516,8 +523,8 @@ public class LobbyManager : MonoBehaviour
             // Continue anyway since we have other ways to notify clients
         }
         
-        // Start the countdown coroutine
-        StartCoroutine(StartGameCountdown());
+        // Start the countdown coroutine and store a reference to it
+        activeCountdownCoroutine = StartCoroutine(StartGameCountdown());
     }
     
     private async void UpdateLobbyGameStartingStatus(bool isStarting)
@@ -554,34 +561,114 @@ public class LobbyManager : MonoBehaviour
         }
     }
 
+    // Method for the cancel button to call
+    public void CancelGameCountdown()
+    {
+        // Only the host can cancel the countdown
+        if (!IsLobbyHost())
+        {
+            return;
+        }
+        
+        countdownCancelled = true;
+        Debug.Log("Game countdown cancelled by user.");
+        
+        // Hide the overlay
+        if (countdownOverlay != null)
+        {
+            countdownOverlay.SetActive(false);
+        }
+        
+        // Re-enable the start button
+        if (startGameButton != null)
+        {
+            startGameButton.interactable = true;
+        }
+        
+        // Update lobby data to indicate game is no longer starting
+        UpdateLobbyGameStartingStatus(false);
+        
+        // Cancel the coroutine if it's running
+        if (activeCountdownCoroutine != null)
+        {
+            StopCoroutine(activeCountdownCoroutine);
+            activeCountdownCoroutine = null;
+        }
+    }
+
     private System.Collections.IEnumerator StartGameCountdown()
     {
-        // Disable the start button during countdown
-        if (startGameButton) startGameButton.interactable = false;
+        // Note: The coroutine reference is stored when StartCoroutine is called
+        // We don't set it here
         
-        // Show and initialize countdown text
-        if (countdownText)
+        // Reset cancellation flag
+        countdownCancelled = false;
+        
+        // Disable the start button during countdown
+        if (startGameButton) 
+            startGameButton.interactable = false;
+        
+        Debug.Log("Starting game countdown...");
+        
+        // Show and initialize countdown overlay
+        if (countdownOverlay != null)
         {
-            countdownText.gameObject.SetActive(true);
+            // Activate the overlay
+            countdownOverlay.SetActive(true);
+            
+            // Reset text color if it was previously set to red for errors
+            if (countdownText != null)
+            {
+                countdownText.color = Color.white;
+            }
+            
+            // Set up cancel button if we're the host
+            if (cancelCountdownButton != null)
+            {
+                // Clear existing listeners to avoid duplicates
+                cancelCountdownButton.onClick.RemoveAllListeners();
+                cancelCountdownButton.onClick.AddListener(CancelGameCountdown);
+                
+                // Only host can cancel
+                cancelCountdownButton.gameObject.SetActive(IsLobbyHost());
+            }
             
             // Countdown from 5 to 1
             for (int i = 5; i >= 1; i--)
             {
-                countdownText.text = i.ToString();
+                // Check if cancelled during countdown
+                if (countdownCancelled)
+                {
+                    yield break; // Exit if cancelled
+                }
+                
+                if (countdownText != null)
+                {
+                    countdownText.text = i.ToString();
+                }
+                
                 Debug.Log($"Game starting in {i}...");
                 yield return new WaitForSeconds(1f);
             }
             
+            // Check if cancelled during the last second
+            if (countdownCancelled)
+            {
+                yield break;
+            }
+            
             // Show "Starting..." message
-            countdownText.text = "Starting...";
-            Debug.Log("Game starting now!");
+            if (countdownText != null)
+            {
+                countdownText.text = "Starting...";
+            }
         }
         else
         {
-            // If no countdown text UI, just wait 5 seconds
+            // If no countdown overlay, just wait 5 seconds
             yield return new WaitForSeconds(5f);
         }
-
+        
         // Update character selections in NetworkManagerUI for all players
         if (NetworkManagerUI.Instance != null && joinedLobby != null)
         {
@@ -620,10 +707,23 @@ public class LobbyManager : MonoBehaviour
                 Debug.LogError("Client doesn't have valid connection data configured");
                 
                 // Set a timeout to notify the player
-                if (countdownText != null)
+                if (countdownOverlay != null)
                 {
-                    countdownText.text = "Connection error!";
-                    countdownText.color = Color.red;
+                    countdownOverlay.SetActive(true);
+                    
+                    if (countdownText != null)
+                    {
+                        countdownText.text = "Connection error!";
+                        countdownText.color = Color.red;
+                    }
+                    
+                    // Make sure the cancel button is visible for all players in this case
+                    if (cancelCountdownButton != null)
+                    {
+                        cancelCountdownButton.onClick.RemoveAllListeners();
+                        cancelCountdownButton.onClick.AddListener(() => countdownOverlay.SetActive(false));
+                        cancelCountdownButton.gameObject.SetActive(true);
+                    }
                 }
                 yield break;
             }

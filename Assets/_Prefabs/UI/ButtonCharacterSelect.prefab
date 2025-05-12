@@ -146,7 +146,7 @@ GameObject:
   - component: {fileID: 2688773925950714423}
   - component: {fileID: 8578544578330767044}
   m_Layer: 5
-  m_Name: Text (TMP)
+  m_Name: PlayerNameText (TMP)
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -849,6 +849,7 @@ GameObject:
   - component: {fileID: 8292441739547818743}
   - component: {fileID: 2642193702558048056}
   - component: {fileID: 5517541149258294149}
+  - component: {fileID: 880356301270501760}
   m_Layer: 5
   m_Name: ButtonCharacterSelect
   m_TagString: Untagged
@@ -976,6 +977,25 @@ MonoBehaviour:
   m_EffectColor: {r: 0, g: 0, b: 0, a: 0.84313726}
   m_EffectDistance: {x: 0, y: -4}
   m_UseGraphicAlpha: 1
+--- !u!114 &880356301270501760
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5606204097107570016}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a9bdf270132ad499bad370cafccb7111, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  characterIndex: 0
+  isComingSoon: 0
+  stateSelected: {fileID: 7151182701883681863}
+  stateComingSoon: {fileID: 6089719495637752142}
+  button: {fileID: 2642193702558048056}
+  playerNameText: {fileID: 8578544578330767044}
+  kickButton: {fileID: 8014581212206713532}
 --- !u!1 &6089719495637752142
 GameObject:
   m_ObjectHideFlags: 0
