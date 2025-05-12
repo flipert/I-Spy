@@ -20,10 +20,7 @@ public class LobbyManager : MonoBehaviour
     [SerializeField] private Button startGameButton; // Drag your StartGameButton here
     [SerializeField] private Button leaveLobbyButton; // Drag your LeaveLobbyButton here
     [SerializeField] private TMPro.TextMeshProUGUI lobbyCodeText; // Drag LobbyCodeText here
-    [Header("Countdown Overlay")]
-    [SerializeField] private GameObject countdownOverlay; // The full-screen overlay for countdown
-    [SerializeField] private TMPro.TextMeshProUGUI countdownText; // Text element within the overlay
-    [SerializeField] private Button cancelCountdownButton; // Button to cancel the countdown
+    // Note: Countdown UI handling is now done by the CountdownOverlayController component
 
     [Header("Lobby Browser UI")]
     [SerializeField] private GameObject lobbyBrowserPanel; // Panel to show available lobbies
@@ -325,6 +322,10 @@ public class LobbyManager : MonoBehaviour
     // Countdown state tracking
     private bool countdownCancelled = false;
     private Coroutine activeCountdownCoroutine = null;
+    private Coroutine activeFadeCoroutine = null;
+    
+    // Flag to track if countdown is already in progress
+    private bool isCountdownInProgress = false;
     
     private void SendHeartbeat(string lobbyId, ref int failureCount, int maxFailures)
     {
@@ -497,6 +498,18 @@ public class LobbyManager : MonoBehaviour
                 {
                     playerName = player.Data["PlayerName"].Value;
                 }
+                
+                // Update the player name in character selection if we're in-game
+                // Attempt to parse the player ID to a client ID
+                if (CharacterSelectionManager.Instance != null)
+                {
+                    try {
+                        ulong clientId = ulong.Parse(player.Id);
+                        CharacterSelectionManager.Instance.SetPlayerName(clientId, playerName);
+                    } catch (System.Exception) {
+                        // Couldn't parse ID - this is expected for preview/testing in editor
+                    }
+                }
 
                 // Check if player is ready
                 bool isReady = false;
@@ -599,14 +612,7 @@ public class LobbyManager : MonoBehaviour
         }
         
         countdownCancelled = true;
-        isCountdownOverlayActive = false;
         Debug.Log("Game countdown cancelled by user.");
-        
-        // Hide the overlay with fade out
-        if (countdownOverlay != null)
-        {
-            UIFadeUtility.FadeOut(this, countdownOverlay, 0.3f);
-        }
         
         // Re-enable the start button
         if (startGameButton != null)
@@ -627,9 +633,6 @@ public class LobbyManager : MonoBehaviour
 
     private System.Collections.IEnumerator StartGameCountdown()
     {
-        // Note: The coroutine reference is stored when StartCoroutine is called
-        // We don't set it here
-        
         // Reset cancellation flag
         countdownCancelled = false;
         
@@ -639,76 +642,51 @@ public class LobbyManager : MonoBehaviour
         
         Debug.Log("Starting game countdown...");
         
-        // Show and initialize countdown overlay - but only if it's not already active
-        if (countdownOverlay != null && !isCountdownOverlayActive)
+        // Use the dedicated CountdownOverlayController if available
+        if (CountdownOverlayController.Instance != null)
         {
-            // Mark the overlay as active to prevent double activation
-            isCountdownOverlayActive = true;
+            // Define what happens when the countdown is completed
+            UnityEngine.Events.UnityAction onCountdownComplete = () => {
+                Debug.Log("Countdown complete, proceeding with game start");
+                // The game start code continues after the yield statements below
+            };
             
-            // Activate the overlay with a smooth fade
-            UIFadeUtility.FadeIn(this, countdownOverlay, 0.3f);
+            // Define what happens if the countdown is cancelled
+            UnityEngine.Events.UnityAction onCountdownCancelled = () => {
+                Debug.Log("Countdown cancelled by user");
+                countdownCancelled = true;
+            };
             
-            // Reset text color if it was previously set to red for errors
-            if (countdownText != null)
-            {
-                countdownText.color = Color.white;
-            }
-            
-            // Set up cancel button if we're the host
-            if (cancelCountdownButton != null)
-            {
-                // Clear existing listeners to avoid duplicates
-                cancelCountdownButton.onClick.RemoveAllListeners();
-                cancelCountdownButton.onClick.AddListener(CancelGameCountdown);
-                
-                // Only host can cancel
-                cancelCountdownButton.gameObject.SetActive(IsLobbyHost());
-            }
-            
-            // Countdown from 5 to 1
-            for (int i = 5; i >= 1; i--)
-            {
-                // Check if cancelled during countdown
-                if (countdownCancelled)
-                {
-                    yield break; // Exit if cancelled
-                }
-                
-                if (countdownText != null)
-                {
-                    countdownText.text = i.ToString();
-                }
-                
-                Debug.Log($"Game starting in {i}...");
-                yield return new WaitForSeconds(1f);
-            }
-            
-            // Check if cancelled during the last second
+            // Start the countdown with the CountdownOverlayController
+            CountdownOverlayController.Instance.StartCountdown(
+                5, // Count down from 5
+                IsLobbyHost(), // Only host can cancel
+                onCountdownCancelled, // Called if cancelled
+                onCountdownComplete // Called when complete
+            );
+        }
+        
+        // Wait for the countdown
+        for (int i = 5; i >= 1; i--)
+        {
+            // Check if cancelled
             if (countdownCancelled)
             {
                 yield break;
             }
             
-            // Show "Starting..." message
-            if (countdownText != null)
-            {
-                countdownText.text = "Starting...";
-            }
-            
-            // Wait briefly before proceeding
+            Debug.Log($"Game starting in {i}...");
             yield return new WaitForSeconds(1f);
-            
-            // Fade out the overlay at the end of the countdown
-            UIFadeUtility.FadeOut(this, countdownOverlay, 0.3f, () => {
-                // Reset the overlay state when fade out is complete
-                isCountdownOverlayActive = false;
-            });
         }
-        else
+        
+        // Check if cancelled during the last second
+        if (countdownCancelled)
         {
-            // If no countdown overlay, just wait 5 seconds
-            yield return new WaitForSeconds(5f);
+            yield break;
         }
+        
+        // Wait a moment longer for the "Starting..." message
+        yield return new WaitForSeconds(1f);
         
         // Update character selections in NetworkManagerUI for all players
         if (NetworkManagerUI.Instance != null && joinedLobby != null)
@@ -747,24 +725,16 @@ public class LobbyManager : MonoBehaviour
             {
                 Debug.LogError("Client doesn't have valid connection data configured");
                 
-                // Set a timeout to notify the player
-                if (countdownOverlay != null)
+                // Use the CountdownOverlayController to show the error message
+                if (CountdownOverlayController.Instance != null)
                 {
-                    countdownOverlay.SetActive(true);
-                    
-                    if (countdownText != null)
-                    {
-                        countdownText.text = "Connection error!";
-                        countdownText.color = Color.red;
-                    }
-                    
-                    // Make sure the cancel button is visible for all players in this case
-                    if (cancelCountdownButton != null)
-                    {
-                        cancelCountdownButton.onClick.RemoveAllListeners();
-                        cancelCountdownButton.onClick.AddListener(() => countdownOverlay.SetActive(false));
-                        cancelCountdownButton.gameObject.SetActive(true);
-                    }
+                    CountdownOverlayController.Instance.ShowError("Connection error!", () => {
+                        Debug.Log("Error dismissed by user");
+                    });
+                }
+                else
+                {
+                    Debug.LogError("Connection error! CountdownOverlayController not available to display message.");
                 }
                 yield break;
             }
@@ -819,10 +789,9 @@ public class LobbyManager : MonoBehaviour
             {
                 Debug.LogError($"Error loading game scene: {e.Message}");
                 // Show error to host
-                if (countdownText != null)
+                if (CountdownOverlayController.Instance != null)
                 {
-                    countdownText.text = "Failed to start game!";
-                    countdownText.color = Color.red;
+                    CountdownOverlayController.Instance.ShowError("Failed to start game!");
                 }
                 
                 // Re-enable start button in case they want to try again
@@ -839,9 +808,9 @@ public class LobbyManager : MonoBehaviour
             bool connected = false;
             
             // Show connecting message
-            if (countdownText != null)
+            if (CountdownOverlayController.Instance != null)
             {
-                countdownText.text = "Connecting...";
+                CountdownOverlayController.Instance.ShowMessage("Connecting...");
             }
             
             // Start client connection - outside try block to avoid yield issues
@@ -854,10 +823,9 @@ public class LobbyManager : MonoBehaviour
             {
                 connectionStarted = false;
                 Debug.LogError($"Error starting client connection: {e.Message}");
-                if (countdownText != null)
+                if (CountdownOverlayController.Instance != null)
                 {
-                    countdownText.text = "Connection error!";
-                    countdownText.color = Color.red;
+                    CountdownOverlayController.Instance.ShowError("Connection error!");
                 }
             }
             
@@ -874,9 +842,9 @@ public class LobbyManager : MonoBehaviour
                         Debug.Log("Client successfully connected to host!");
                         
                         // Update UI
-                        if (countdownText != null)
+                        if (CountdownOverlayController.Instance != null)
                         {
-                            countdownText.text = "Connected! Waiting for game start...";
+                            CountdownOverlayController.Instance.ShowMessage("Connected! Waiting for game start...");
                         }
                         
                         // Break out of the waiting loop
@@ -891,10 +859,9 @@ public class LobbyManager : MonoBehaviour
                 if (!connected)
                 {
                     Debug.LogError("Client connection timed out!");
-                    if (countdownText != null)
+                    if (CountdownOverlayController.Instance != null)
                     {
-                        countdownText.text = "Connection timed out!";
-                        countdownText.color = Color.red;
+                        CountdownOverlayController.Instance.ShowError("Connection timed out!");
                     }
                     
                     // Could add a retry button here
@@ -932,10 +899,9 @@ public class LobbyManager : MonoBehaviour
         if (lobbyPanel != null && lobbyPanel.activeSelf)
         {
             // Show error message to user
-            if (countdownText != null)
+            if (CountdownOverlayController.Instance != null)
             {
-                countdownText.text = "Connection failed!";
-                countdownText.color = Color.red;
+                CountdownOverlayController.Instance.ShowError("Connection failed!");
             }
             
             // Re-enable the start button if we're the host
@@ -974,18 +940,20 @@ public class LobbyManager : MonoBehaviour
             if (NetworkManager.Singleton == null || !NetworkManager.Singleton.IsConnectedClient)
             {
                 Debug.LogWarning("Client disconnected during scene transition");
-                if (countdownText != null)
+                
+                // Show error using CountdownOverlayController if available
+                if (CountdownOverlayController.Instance != null)
                 {
-                    countdownText.text = "Connection lost!";
-                    countdownText.color = Color.red;
+                    CountdownOverlayController.Instance.ShowError("Connection lost!");
                 }
+                
                 yield break;
             }
             
             // Update UI to show we're still waiting
-            if (countdownText != null)
+            if (CountdownOverlayController.Instance != null)
             {
-                countdownText.text = $"Game starting... {Mathf.Round(timeout - (Time.realtimeSinceStartup - startTime))}s";
+                CountdownOverlayController.Instance.ShowMessage($"Game starting... {Mathf.Round(timeout - (Time.realtimeSinceStartup - startTime))}s");
             }
             
             // Give a short wait between checks
@@ -1009,10 +977,9 @@ public class LobbyManager : MonoBehaviour
             catch (System.Exception e)
             {
                 Debug.LogError($"Error loading game scene: {e.Message}");
-                if (countdownText != null)
+                if (CountdownOverlayController.Instance != null)
                 {
-                    countdownText.text = "Failed to join game!";
-                    countdownText.color = Color.red;
+                    CountdownOverlayController.Instance.ShowError("Failed to join game!");
                 }
             }
         }

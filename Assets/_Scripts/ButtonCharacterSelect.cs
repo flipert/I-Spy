@@ -5,172 +5,6 @@ using Unity.Netcode;
 using System.Collections.Generic;
 using System;
 
-/// <summary>
-/// Manages all character selections in the lobby scene.
-/// This coordinates between individual ButtonCharacterSelect components.
-/// </summary>
-public class CharacterSelectionManager : MonoBehaviour
-{
-    private static CharacterSelectionManager _instance;
-    public static CharacterSelectionManager Instance { get; private set; }
-    
-    // List of all ButtonCharacterSelect components in the scene
-    private List<ButtonCharacterSelect> characterButtons = new List<ButtonCharacterSelect>();
-    
-    // Dictionary to track which client has selected which character
-    private Dictionary<ulong, ButtonCharacterSelect> clientSelections = new Dictionary<ulong, ButtonCharacterSelect>();
-    
-    private void Awake()
-    {
-        // Singleton pattern
-        if (Instance == null)
-        {
-            Instance = this;
-            // Don't destroy on load as it needs to persist from lobby to game
-            DontDestroyOnLoad(gameObject);
-        }
-        else if (Instance != this)
-        {
-            Destroy(gameObject);
-            return;
-        }
-    }
-    
-    private void Start()
-    {
-        // Listen for network events
-        if (NetworkManager.Singleton != null)
-        {
-            NetworkManager.Singleton.OnClientConnectedCallback += OnClientConnected;
-            NetworkManager.Singleton.OnClientDisconnectCallback += OnClientDisconnected;
-        }
-    }
-    
-    private void OnDestroy()
-    {
-        // Clean up event subscriptions
-        if (NetworkManager.Singleton != null)
-        {
-            NetworkManager.Singleton.OnClientConnectedCallback -= OnClientConnected;
-            NetworkManager.Singleton.OnClientDisconnectCallback -= OnClientDisconnected;
-        }
-    }
-    
-    // Register a ButtonCharacterSelect with the manager
-    public void RegisterCharacterButton(ButtonCharacterSelect button)
-    {
-        if (!characterButtons.Contains(button))
-        {
-            characterButtons.Add(button);
-        }
-    }
-    
-    // Unregister a ButtonCharacterSelect from the manager
-    public void UnregisterCharacterButton(ButtonCharacterSelect button)
-    {
-        characterButtons.Remove(button);
-    }
-    
-    // Called when a client selects a character
-    public void SelectCharacter(ulong clientId, ButtonCharacterSelect selectedButton)
-    {
-        // If this client already has a selection, deselect it
-        if (clientSelections.TryGetValue(clientId, out ButtonCharacterSelect previousSelection))
-        {
-            previousSelection.DeselectCharacter();
-        }
-        
-        // Update selection tracking
-        clientSelections[clientId] = selectedButton;
-        
-        // Update NetworkManagerUI if available
-        if (NetworkManagerUI.Instance != null)
-        {
-            NetworkManagerUI.Instance.SelectCharacter(selectedButton.CharacterIndex);
-        }
-    }
-    
-    // Called when a client deselects a character
-    public void DeselectCharacter(ulong clientId)
-    {
-        clientSelections.Remove(clientId);
-    }
-    
-    // Handle client connections
-    private void OnClientConnected(ulong clientId)
-    {
-        Debug.Log($"Client connected to lobby: {clientId}");
-        // Could initialize character selection here if needed
-    }
-    
-    // Handle client disconnections
-    private void OnClientDisconnected(ulong clientId)
-    {
-        Debug.Log($"Client disconnected from lobby: {clientId}");
-        
-        // If this client had a selection, deselect it
-        if (clientSelections.TryGetValue(clientId, out ButtonCharacterSelect selection))
-        {
-            selection.DeselectCharacter();
-            clientSelections.Remove(clientId);
-        }
-    }
-    
-    // Get the currently selected character button for a client
-    public ButtonCharacterSelect GetSelectedCharacterFor(ulong clientId)
-    {
-        clientSelections.TryGetValue(clientId, out ButtonCharacterSelect selection);
-        return selection;
-    }
-    
-    // Check if a character is available (not selected by any client)
-    public bool IsCharacterAvailable(ButtonCharacterSelect button)
-    {
-        return !clientSelections.ContainsValue(button);
-    }
-    
-    // Get the client who selected a character
-    public ulong? GetClientForCharacter(ButtonCharacterSelect button)
-    {
-        foreach (var kvp in clientSelections)
-        {
-            if (kvp.Value == button)
-            {
-                return kvp.Key;
-            }
-        }
-        return null;
-    }
-    
-    // Reset all character selections
-    public void ResetAllSelections()
-    {
-        foreach (var button in characterButtons)
-        {
-            button.DeselectCharacter();
-        }
-        clientSelections.Clear();
-    }
-    
-    // Kick a player from the lobby
-    public void KickPlayer(ulong clientId)
-    {
-        // First, deselect their character
-        if (clientSelections.TryGetValue(clientId, out ButtonCharacterSelect selection))
-        {
-            selection.DeselectCharacter();
-            clientSelections.Remove(clientId);
-        }
-        
-        // Then, disconnect them if we're the host
-        if (NetworkManager.Singleton != null && 
-            (NetworkManager.Singleton.IsHost || NetworkManager.Singleton.IsServer))
-        {
-            NetworkManager.Singleton.DisconnectClient(clientId);
-        }
-    }
-}
-
 
 /// <summary>
 /// Controls a character selection tile in the lobby screen.
@@ -180,7 +14,12 @@ public class ButtonCharacterSelect : MonoBehaviour
 {
     [Header("Character Info")]
     [SerializeField] private int characterIndex;
-    [SerializeField] private bool isComingSoon = false;
+    
+    // Coming Soon status - set only by CharacterSelectSetup, not in inspector
+    private bool isComingSoon = false;
+    
+    // Expose IsComingSoon as a public property so it can be controlled externally
+    public bool IsComingSoon { get { return isComingSoon; } set { isComingSoon = value; UpdateVisualState(); } }
     
     [Header("State Game Objects")]
     [SerializeField] private GameObject stateSelected;
@@ -250,28 +89,34 @@ public class ButtonCharacterSelect : MonoBehaviour
         if (selectedByClientId.HasValue && selectedByClientId.Value != NetworkManager.Singleton.LocalClientId)
             return;
             
-        // Use the manager to handle selection
+        // Use the manager to handle selection - this will deselect any previously selected character
         SelectLocalCharacter();
     }
     
     private void SelectLocalCharacter()
     {
-        if (CharacterSelectionManager.Instance != null && NetworkManager.Singleton != null)
+        // For non-networked testing
+        if (NetworkManager.Singleton == null || !NetworkManager.Singleton.IsClient)
         {
-            // Let the manager handle the selection
-            CharacterSelectionManager.Instance.SelectCharacter(
-                NetworkManager.Singleton.LocalClientId, 
-                this
-            );
+            // Just toggle selection if not networked
+            bool isCurrentlySelected = selectedByClientId.HasValue;
+            selectedByClientId = isCurrentlySelected ? null : (ulong?)999; // Use dummy ID for testing
+            UpdateVisualState();
+            return;
+        }
+        
+        // Inform the CharacterSelectionManager about this selection
+        if (CharacterSelectionManager.Instance != null)
+        {
+            // This will handle deselecting previous character and update the selection
+            CharacterSelectionManager.Instance.SelectCharacter(NetworkManager.Singleton.LocalClientId, this);
+            Debug.Log($"[ButtonCharacterSelect] Selected character {characterIndex} for client {NetworkManager.Singleton.LocalClientId}");
         }
         else
         {
-            // Fallback for testing in editor
-            ulong clientId = NetworkManager.Singleton != null ? 
-                NetworkManager.Singleton.LocalClientId : 0;
-                
-            // Just update this component directly
-            selectedByClientId = clientId;
+            // Fallback if no manager (shouldn't happen in production)
+            Debug.LogWarning("[ButtonCharacterSelect] No CharacterSelectionManager found! Cannot properly coordinate character selection.");
+            selectedByClientId = NetworkManager.Singleton.LocalClientId;
             UpdateVisualState();
             
             // Inform NetworkManagerUI about the selection if available
@@ -325,6 +170,13 @@ public class ButtonCharacterSelect : MonoBehaviour
     
     private void UpdateVisualState()
     {
+        // Check if this GameObject is active before attempting to start coroutines
+        if (!isActiveAndEnabled)
+        {
+            Debug.LogWarning($"[ButtonCharacterSelect] Attempted to update visual state on inactive GameObject {gameObject.name}");
+            return;
+        }
+        
         // Coming Soon state takes priority
         if (isComingSoon)
         {
@@ -466,16 +318,5 @@ public class ButtonCharacterSelect : MonoBehaviour
         return selectedByClientId;
     }
     
-    // Property for inspector checkbox
-    public bool IsComingSoon
-    {
-        get { return isComingSoon; }
-        set 
-        { 
-            isComingSoon = value;
-            // Update visual state when changed in inspector
-            if (isActiveAndEnabled)
-                UpdateVisualState();
-        }
-    }
+    // Note: We've removed the duplicate IsSelected method that was causing the CS0111 error
 }
