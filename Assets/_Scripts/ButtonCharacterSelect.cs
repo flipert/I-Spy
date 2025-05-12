@@ -75,7 +75,7 @@ public class CharacterSelectionManager : MonoBehaviour
     public void SelectCharacter(ulong clientId, ButtonCharacterSelect selectedButton)
     {
         // If this client already has a selection, deselect it
-        if (clientSelections.TryGetValue(clientId, out ButtonCharacterSelect previousSelection))
+        if (clientSelections.TryGetValue(clientId, out ButtonCharacterSelect previousSelection) && previousSelection != selectedButton)
         {
             previousSelection.DeselectCharacter();
         }
@@ -269,6 +269,16 @@ public class ButtonCharacterSelect : MonoBehaviour
             // Fallback for testing in editor
             ulong clientId = NetworkManager.Singleton != null ? 
                 NetworkManager.Singleton.LocalClientId : 0;
+            
+            // Find and deselect any previously selected character
+            ButtonCharacterSelect[] allButtons = FindObjectsOfType<ButtonCharacterSelect>();
+            foreach (ButtonCharacterSelect button in allButtons)
+            {
+                if (button != this && button.GetSelectedByClientId() == clientId)
+                {
+                    button.DeselectCharacter();
+                }
+            }
                 
             // Just update this component directly
             selectedByClientId = clientId;
