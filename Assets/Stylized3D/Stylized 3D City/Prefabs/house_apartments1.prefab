@@ -370,9 +370,13 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: caf37f8c53c7d45be995ea75b4282398, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  transparentOpacity: 30
+  transparentOpacity: 15
   normalOpacity: 100
-  transitionSpeed: 5
-  fadeDistance: 2
+  transitionSpeed: 10
+  fadeDistance: 4
   autoFindCamera: 1
-  buildingRenderers: []
+  buildingRenderers:
+  - {fileID: 23569162578321578}
+  - {fileID: 23586513024963032}
+  - {fileID: 23500044352919570}
+  - {fileID: 23500044352919570}
