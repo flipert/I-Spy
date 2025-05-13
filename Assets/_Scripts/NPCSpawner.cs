@@ -15,6 +15,14 @@ public Vector3 spawnAreaCenter = Vector3.zero;
 [Tooltip("Size (width, height, depth) of the spawn area.")]
 public Vector3 spawnAreaSize = new Vector3(20f, 0, 20f);
 
+[Header("Collision Settings")]
+[Tooltip("Layer mask for buildings and obstacles to avoid when spawning")]
+public LayerMask buildingLayerMask;
+[Tooltip("Minimum distance to keep from buildings when spawning")]
+public float minDistanceFromBuildings = 2.0f;
+[Tooltip("Maximum attempts to find a valid spawn position")]
+public int maxSpawnAttempts = 30;
+
 // List to track spawned NPCs
 private List<NetworkObject> spawnedNPCs = new List<NetworkObject>();
 
@@ -50,12 +58,16 @@ yield break;
 // Spawn NPCs
 for (int i = 0; i < maxNPCCount; i++)
 {
-Vector3 randomPos = spawnAreaCenter + new Vector3(
-Random.Range(-spawnAreaSize.x / 2f, spawnAreaSize.x / 2f),
-0,
-Random.Range(-spawnAreaSize.z / 2f, spawnAreaSize.z / 2f)
-);
-Debug.Log($"NPCSpawner: Spawning NPC {i+1} at {randomPos}.");
+// Find a valid spawn position that's not inside or too close to buildings
+Vector3 spawnPosition = FindValidSpawnPosition();
+            
+if (spawnPosition == Vector3.zero)
+{
+Debug.LogWarning($"NPCSpawner: Failed to find valid spawn position for NPC {i+1} after {maxSpawnAttempts} attempts. Skipping.");
+continue;
+}
+            
+Debug.Log($"NPCSpawner: Spawning NPC {i+1} at {spawnPosition}.");
 // Select a random NPC prefab from the array
 GameObject selectedPrefab = GetRandomNPCPrefab();
 if (selectedPrefab == null)
@@ -64,7 +76,7 @@ Debug.LogError("NPCSpawner: Failed to select a valid NPC prefab.");
 continue;
 }
 // Instantiate the NPC prefab at this position
-GameObject npcInstance = Instantiate(selectedPrefab, randomPos, Quaternion.identity);
+GameObject npcInstance = Instantiate(selectedPrefab, spawnPosition, Quaternion.identity);
 if (npcInstance == null)
 {
 Debug.LogError("NPCSpawner: Failed to instantiate NPC prefab.");
@@ -106,6 +118,56 @@ private void OnDestroy()
     {
         NetworkManager.Singleton.OnClientConnectedCallback -= OnClientConnected;
     }
+}
+
+// Find a valid spawn position that's not inside or too close to buildings
+private Vector3 FindValidSpawnPosition()
+{
+    int attempts = 0;
+    
+    while (attempts < maxSpawnAttempts)
+    {
+        // Generate a random position within the spawn area
+        Vector3 randomPos = spawnAreaCenter + new Vector3(
+            Random.Range(-spawnAreaSize.x / 2f, spawnAreaSize.x / 2f),
+            0,
+            Random.Range(-spawnAreaSize.z / 2f, spawnAreaSize.z / 2f)
+        );
+        
+        // Check if the position is valid (not inside or too close to buildings)
+        if (IsValidSpawnPosition(randomPos))
+        {
+            return randomPos;
+        }
+        
+        attempts++;
+    }
+    
+    // If we couldn't find a valid position after maximum attempts, return zero vector
+    return Vector3.zero;
+}
+
+// Check if a position is valid for spawning (not inside or too close to buildings)
+private bool IsValidSpawnPosition(Vector3 position)
+{
+    // Check if position is inside any building collider
+    Collider[] buildingColliders = Physics.OverlapSphere(position, 0.5f, buildingLayerMask);
+    if (buildingColliders.Length > 0)
+    {
+        // Position is inside a building
+        return false;
+    }
+    
+    // Check if position is too close to any building
+    buildingColliders = Physics.OverlapSphere(position, minDistanceFromBuildings, buildingLayerMask);
+    if (buildingColliders.Length > 0)
+    {
+        // Position is too close to a building
+        return false;
+    }
+    
+    // Position is valid
+    return true;
 }
 
 // Returns a random NPC prefab from the array

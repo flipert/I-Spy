@@ -10,8 +10,8 @@ GameObject:
   m_Component:
   - component: {fileID: 3038671074602219463}
   - component: {fileID: 6353914629026633693}
-  m_Layer: 0
-  m_Name: Circle
+  m_Layer: 7
+  m_Name: Shadow
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -97,7 +97,7 @@ GameObject:
   - component: {fileID: 2735814200006622442}
   - component: {fileID: 2109716159598790390}
   - component: {fileID: 5384561374944021589}
-  m_Layer: 0
+  m_Layer: 7
   m_Name: TheAgent
   m_TagString: Player
   m_Icon: {fileID: 0}
@@ -156,11 +156,11 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   moveSpeed: 2
   runMultiplier: 2
+  buildingTag: Building
   maxStamina: 10
   staminaDepletionRate: 3
   staminaRegenRate: 2
   minStaminaToSprint: 4
-  staminaBarFill: {fileID: 0}
 --- !u!136 &2109716159598790390
 CapsuleCollider:
   m_ObjectHideFlags: 0
@@ -215,7 +215,7 @@ GameObject:
   m_Component:
   - component: {fileID: 1163819008692052922}
   - component: {fileID: 7354138450922049925}
-  m_Layer: 0
+  m_Layer: 7
   m_Name: Character
   m_TagString: Untagged
   m_Icon: {fileID: 0}

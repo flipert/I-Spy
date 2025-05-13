@@ -4161,7 +4161,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b5dfb5ae1cfdc4cf7a7c091eaec03a49, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  sceneCanvasGroup: {fileID: 1199148549}
+  sceneCanvasGroup: {fileID: 0}
   logoCanvasGroup: {fileID: 1591926587}
   buttonGroupCanvasGroup: {fileID: 382677006}
   initialDelay: 0

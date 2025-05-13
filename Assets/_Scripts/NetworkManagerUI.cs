@@ -361,23 +361,44 @@ public class NetworkManagerUI : MonoBehaviour
         yield return new WaitForSeconds(1.0f);
         
         // Find the camera and make it follow the player
-        CameraFollow cameraFollow = FindObjectOfType<CameraFollow>();
-        if (cameraFollow != null)
+        // First try to find the ThirdPersonCamera
+        ThirdPersonCamera thirdPersonCamera = FindObjectOfType<ThirdPersonCamera>();
+        if (thirdPersonCamera != null)
         {
-            Debug.Log("Found CameraFollow, triggering player search");
-            cameraFollow.FindLocalPlayerWithRetry();
+            Debug.Log("Found ThirdPersonCamera, triggering player search");
+            // ThirdPersonCamera has the same method name for finding players
+            thirdPersonCamera.FindLocalPlayerWithRetry();
         }
         else
         {
-            Debug.LogWarning("CameraFollow component not found in the scene");
-            
-            // Try to find it again after a delay (in case it's being instantiated)
-            yield return new WaitForSeconds(0.5f);
-            cameraFollow = FindObjectOfType<CameraFollow>();
+            // Fall back to the original CameraFollow if ThirdPersonCamera is not found
+            CameraFollow cameraFollow = FindObjectOfType<CameraFollow>();
             if (cameraFollow != null)
             {
-                Debug.Log("Found CameraFollow on second try, triggering player search");
+                Debug.Log("Found CameraFollow, triggering player search");
                 cameraFollow.FindLocalPlayerWithRetry();
+            }
+            else
+            {
+                Debug.LogWarning("Neither ThirdPersonCamera nor CameraFollow component found in the scene");
+                
+                // Try to find either camera component again after a delay (in case it's being instantiated)
+                yield return new WaitForSeconds(0.5f);
+                
+                thirdPersonCamera = FindObjectOfType<ThirdPersonCamera>();
+                if (thirdPersonCamera != null)
+                {
+                    Debug.Log("Found ThirdPersonCamera on second try, triggering player search");
+                    thirdPersonCamera.FindLocalPlayerWithRetry();
+                    yield break; // Use yield break instead of return in coroutines
+                }
+                
+                cameraFollow = FindObjectOfType<CameraFollow>();
+                if (cameraFollow != null)
+                {
+                    Debug.Log("Found CameraFollow on second try, triggering player search");
+                    cameraFollow.FindLocalPlayerWithRetry();
+                }
             }
         }
     }

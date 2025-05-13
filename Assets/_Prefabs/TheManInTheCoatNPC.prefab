@@ -10,8 +10,8 @@ GameObject:
   m_Component:
   - component: {fileID: 3038671074602219463}
   - component: {fileID: 6353914629026633693}
-  m_Layer: 0
-  m_Name: Circle
+  m_Layer: 6
+  m_Name: Shadow
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -97,7 +97,7 @@ GameObject:
   - component: {fileID: 923334018254615283}
   - component: {fileID: 2109716159598790390}
   - component: {fileID: 1445705022477998449}
-  m_Layer: 0
+  m_Layer: 6
   m_Name: TheManInTheCoatNPC
   m_TagString: NPC
   m_Icon: {fileID: 0}
@@ -117,8 +117,8 @@ Transform:
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
-  - {fileID: 3038671074602219463}
   - {fileID: 1163819008692052922}
+  - {fileID: 3038671074602219463}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!95 &3879874863887253514
@@ -201,6 +201,7 @@ MonoBehaviour:
   allowedAreaCenter: {x: 0, y: 0, z: 0.35}
   allowedAreaSize: {x: 21.28, y: 0, z: 13.39}
   forbiddenAreaObjects: []
+  buildingTag: Building
   walkSpeed: 1
   rotationSpeed: 0
   destinationTolerance: 0.2
@@ -228,7 +229,7 @@ GameObject:
   m_Component:
   - component: {fileID: 1163819008692052922}
   - component: {fileID: 7354138450922049925}
-  m_Layer: 0
+  m_Layer: 6
   m_Name: Character
   m_TagString: Untagged
   m_Icon: {fileID: 0}
