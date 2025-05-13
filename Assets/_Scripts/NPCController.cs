@@ -225,6 +225,21 @@ public class NPCController : NetworkBehaviour
         if (spriteR != null)
         {
             spriteR.flipX = newValue;
+            
+            // Make the sprite face the camera
+            MakeSpritesFaceCamera();
+        }
+    }
+    
+    // Make sprites face the camera (billboard effect)
+    private void MakeSpritesFaceCamera()
+    {
+        SpriteRenderer spriteR = npcRenderer as SpriteRenderer;
+        if (spriteR != null && spriteR.transform != null)
+        {
+            // Make the sprite face the camera
+            spriteR.transform.rotation = Camera.main != null ? 
+                Quaternion.LookRotation(Camera.main.transform.forward) : Quaternion.identity;
         }
     }
 
@@ -327,6 +342,9 @@ public class NPCController : NetworkBehaviour
                         {
                             spriteR.flipX = (direction.x < 0);
                             networkSpriteFlipX.Value = (direction.x < 0);
+                            
+                            // Make the sprite face the camera
+                            MakeSpritesFaceCamera();
                         }
                     } else {
                         PickNewDestination();
@@ -429,59 +447,81 @@ public class NPCController : NetworkBehaviour
 
     private void Update()
     {
-        // Only the server updates movement logic
-        if (!IsServer) return;
-
-        if (inGroup)
+        // Handle group movement if in a group
+        if (IsServer && inGroup)
         {
-            float step = walkSpeed * Time.deltaTime;
-            Vector3 proposedGroupPos = Vector3.MoveTowards(transform.position, formationTargetPos, step);
-            float distanceToTarget = Vector3.Distance(transform.position, formationTargetPos);
-            if(distanceToTarget > destinationTolerance) {
-                networkIsMoving.Value = true;
+            HandleGroupMovement();
+        }
+        
+        // Always make sprites face the camera
+        if (!IsServer) // Only needed on clients since server updates are sent via network
+        {
+            MakeSpritesFaceCamera();
+        }
+    }
+
+    private void HandleGroupMovement()
+    {
+        float step = walkSpeed * Time.deltaTime;
+        Vector3 proposedGroupPos = Vector3.MoveTowards(transform.position, formationTargetPos, step);
+        float distanceToTarget = Vector3.Distance(transform.position, formationTargetPos);
+        
+        if(distanceToTarget > destinationTolerance) {
+            // Still moving toward formation position
+            networkIsMoving.Value = true;
+            
+            if(!IsPointInForbiddenArea(proposedGroupPos)) {
+                transform.position = proposedGroupPos;
+                networkPosition.Value = proposedGroupPos;
+            }
+            
+            // Compute direction towards the formation target
+            Vector3 groupDirection = (formationTargetPos - transform.position).normalized;
+            
+            // Flip sprite based on x direction if using a SpriteRenderer
+            SpriteRenderer spriteR = npcRenderer as SpriteRenderer;
+            if(spriteR != null && Mathf.Abs(groupDirection.x) > 0.01f) {
+                spriteR.flipX = (groupDirection.x < 0);
+                networkSpriteFlipX.Value = (groupDirection.x < 0);
                 
-                if(!IsPointInForbiddenArea(proposedGroupPos)) {
-                    transform.position = proposedGroupPos;
-                    networkPosition.Value = proposedGroupPos;
-                }
-                // Compute direction towards the formation target
-                Vector3 groupDirection = (formationTargetPos - transform.position).normalized;
-                // Flip sprite based on x direction if using a SpriteRenderer
-                SpriteRenderer spriteR = npcRenderer as SpriteRenderer;
-                if(spriteR != null && Mathf.Abs(groupDirection.x) > 0.01f) {
-                    spriteR.flipX = (groupDirection.x < 0);
-                    networkSpriteFlipX.Value = (groupDirection.x < 0);
-                }
-            } else {
-                transform.position = formationTargetPos;
-                networkPosition.Value = formationTargetPos;
-                networkIsMoving.Value = false;
-                
-                // When in position, face toward the center of the circle
-                Collider[] colliders = Physics.OverlapSphere(transform.position, groupRadius * 2f);
-                List<NPCController> groupMembers = new List<NPCController>();
-                foreach (Collider col in colliders)
+                // Make the sprite face the camera
+                MakeSpritesFaceCamera();
+            }
+        } 
+        else {
+            // Reached formation position
+            transform.position = formationTargetPos;
+            networkPosition.Value = formationTargetPos;
+            networkIsMoving.Value = false;
+            
+            // When in position, face toward the center of the circle
+            Collider[] colliders = Physics.OverlapSphere(transform.position, groupRadius * 2f);
+            List<NPCController> groupMembers = new List<NPCController>();
+            
+            foreach (Collider col in colliders)
+            {
+                NPCController npc = col.GetComponent<NPCController>();
+                if(npc != null && npc.inGroup)
                 {
-                    NPCController npc = col.GetComponent<NPCController>();
-                    if(npc != null && npc.inGroup)
-                    {
-                        groupMembers.Add(npc);
-                    }
+                    groupMembers.Add(npc);
                 }
+            }
+            
+            if(groupMembers.Count > 0) {
+                // Calculate group center
+                Vector3 groupCenter = Vector3.zero;
+                foreach(var member in groupMembers){ groupCenter += member.transform.position; }
+                groupCenter /= groupMembers.Count;
                 
-                if(groupMembers.Count > 0) {
-                    // Calculate group center
-                    Vector3 groupCenter = Vector3.zero;
-                    foreach(var member in groupMembers){ groupCenter += member.transform.position; }
-                    groupCenter /= groupMembers.Count;
+                // Face toward center
+                Vector3 directionToCenter = (groupCenter - transform.position).normalized;
+                SpriteRenderer spriteR = npcRenderer as SpriteRenderer;
+                if(spriteR != null && Mathf.Abs(directionToCenter.x) > 0.01f) {
+                    spriteR.flipX = (directionToCenter.x < 0);
+                    networkSpriteFlipX.Value = (directionToCenter.x < 0);
                     
-                    // Face toward center
-                    Vector3 directionToCenter = (groupCenter - transform.position).normalized;
-                    SpriteRenderer spriteR = npcRenderer as SpriteRenderer;
-                    if(spriteR != null && Mathf.Abs(directionToCenter.x) > 0.01f) {
-                        spriteR.flipX = (directionToCenter.x < 0);
-                        networkSpriteFlipX.Value = (directionToCenter.x < 0);
-                    }
+                    // Make the sprite face the camera
+                    MakeSpritesFaceCamera();
                 }
             }
         }

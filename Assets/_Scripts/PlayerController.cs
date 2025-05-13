@@ -19,6 +19,11 @@ public class PlayerController : NetworkBehaviour
     private NetworkVariable<bool> networkIsRunning = new NetworkVariable<bool>(false);
     private NetworkVariable<bool> networkIsFacingLeft = new NetworkVariable<bool>(false);
 
+    // Variables to track camera rotation and maintain movement direction
+    private Vector3 lastMovementDirection = Vector3.zero;
+    private float lastCameraRotationY = 0f;
+    private bool isCameraRotating = false;
+
     // New network variables for targeting system
     private NetworkVariable<ulong> currentTargetId = new NetworkVariable<ulong>(ulong.MaxValue); // ulong.MaxValue means "no target"
     // NetworkList must be initialized in the declaration for Netcode
@@ -119,10 +124,61 @@ public class PlayerController : NetworkBehaviour
             }
 
             // Create movement vector using X and Z axes (keeping Y the same)
-            Vector3 movement = new Vector3(moveX, 0, moveZ).normalized;
+            Vector3 inputDirection = new Vector3(moveX, 0, moveZ).normalized;
+            
+            // Check if the camera is rotating
+            Camera playerCamera = Camera.main;
+            if (playerCamera != null)
+            {
+                float currentCameraRotationY = playerCamera.transform.eulerAngles.y;
+                
+                // Detect if camera rotation has changed
+                if (Mathf.Abs(currentCameraRotationY - lastCameraRotationY) > 0.1f)
+                {
+                    // Camera is rotating
+                    isCameraRotating = true;
+                    
+                    // If we have a valid last movement direction and we're still moving
+                    if (lastMovementDirection.magnitude > 0.1f && inputDirection.magnitude > 0.1f)
+                    {
+                        // Use the last world-space movement direction instead of calculating a new one
+                        Vector3 currentMovement = lastMovementDirection;
+                        lastCameraRotationY = currentCameraRotationY;
+                        
+                        // Apply movement
+                        transform.position += currentMovement * currentSpeed * Time.deltaTime;
+                        
+                        // Skip the rest of the movement code
+                        goto SkipMovement;
+                    }
+                }
+                else
+                {
+                    // Camera has stopped rotating
+                    if (isCameraRotating && inputDirection.magnitude < 0.1f)
+                    {
+                        // Player has released movement keys after camera rotation
+                        isCameraRotating = false;
+                    }
+                }
+                
+                // Update last camera rotation
+                lastCameraRotationY = currentCameraRotationY;
+            }
+            
+            // Convert input direction to be relative to camera orientation
+            Vector3 movement = GetCameraRelativeMovement(inputDirection);
+            
+            // Store the world-space movement direction for use during camera rotation
+            if (movement.magnitude > 0.1f)
+            {
+                lastMovementDirection = movement;
+            }
             
             // Apply movement
             transform.position += movement * currentSpeed * Time.deltaTime;
+            
+        SkipMovement:
 
             // Update animator if we have one
             if (animator != null)
@@ -130,11 +186,44 @@ public class PlayerController : NetworkBehaviour
                 animator.SetBool("Running", isMoving);
             }
 
-            // Update sprite direction if we have a sprite renderer
-            if (characterSprite != null && moveX != 0)
+            // Always make sprite face the camera (billboard effect)
+            if (characterSprite != null)
             {
-                isFacingLeft = (moveX < 0);
-                characterSprite.flipX = isFacingLeft;
+                // For movement-based flipping (optional - can be removed if you want sprites to always face one direction)
+                if (moveX != 0)
+                {
+                    // Determine if character should face left or right based on camera-relative movement
+                    Camera viewCamera = Camera.main;
+                    if (viewCamera != null)
+                    {
+                        // Get the current movement direction (must be initialized before this point)
+                        Vector3 currentMovement = lastMovementDirection;
+                        if (currentMovement.magnitude < 0.1f)
+                        {
+                            // If we don't have a valid movement direction, use the input direction
+                            currentMovement = GetCameraRelativeMovement(inputDirection);
+                        }
+                        
+                        // Project the movement onto the camera's right vector to determine if moving left or right relative to camera
+                        float rightMovement = Vector3.Dot(currentMovement, viewCamera.transform.right);
+                        isFacingLeft = (rightMovement < 0);
+                        characterSprite.flipX = isFacingLeft;
+                    }
+                    else
+                    {
+                        // Fallback to world-space if camera not found
+                        isFacingLeft = (moveX < 0);
+                        characterSprite.flipX = isFacingLeft;
+                    }
+                }
+                
+                // Make the sprite face the camera
+                if (characterSprite.transform.parent != null)
+                {
+                    // Keep the sprite facing the camera while preserving the parent's position
+                    characterSprite.transform.rotation = Camera.main != null ? 
+                        Quaternion.LookRotation(Camera.main.transform.forward) : Quaternion.identity;
+                }
             }
 
             // Update network variables to sync with other clients
@@ -166,7 +255,16 @@ public class PlayerController : NetworkBehaviour
             // Update sprite direction
             if (characterSprite != null)
             {
+                // Set the flip based on network value
                 characterSprite.flipX = networkIsFacingLeft.Value;
+                
+                // Make the sprite face the camera
+                if (characterSprite.transform.parent != null)
+                {
+                    // Keep the sprite facing the camera while preserving the parent's position
+                    characterSprite.transform.rotation = Camera.main != null ? 
+                        Quaternion.LookRotation(Camera.main.transform.forward) : Quaternion.identity;
+                }
             }
         }
     }
@@ -177,6 +275,30 @@ public class PlayerController : NetworkBehaviour
         networkPosition.Value = position;
         networkIsRunning.Value = isRunning;
         networkIsFacingLeft.Value = isFacingLeft;
+    }
+    
+    // Convert input direction to be relative to camera orientation
+    private Vector3 GetCameraRelativeMovement(Vector3 inputDirection)
+    {
+        if (inputDirection.magnitude == 0) return Vector3.zero;
+        
+        Camera mainCamera = Camera.main;
+        if (mainCamera == null) return inputDirection; // Fallback to world space if no camera
+        
+        // Get the camera's forward and right vectors, but ignore Y component to keep movement on XZ plane
+        Vector3 cameraForward = mainCamera.transform.forward;
+        Vector3 cameraRight = mainCamera.transform.right;
+        
+        // Project to XZ plane
+        cameraForward.y = 0;
+        cameraRight.y = 0;
+        cameraForward.Normalize();
+        cameraRight.Normalize();
+        
+        // Calculate the movement direction relative to the camera
+        Vector3 moveDirection = (cameraForward * inputDirection.z + cameraRight * inputDirection.x).normalized;
+        
+        return moveDirection;
     }
 
     /// <summary>
