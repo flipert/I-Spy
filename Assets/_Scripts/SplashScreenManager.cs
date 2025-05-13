@@ -14,10 +14,6 @@ public class SplashScreenManager : MonoBehaviour
     [Header("Logo Animation Settings")]
     [SerializeField] private float logoDelayAfterBackgroundFade = 0.3f;
     [SerializeField] private float logoFadeInDuration = 0.8f;
-    [SerializeField] private float delayBeforeBump = 0.2f;
-    [SerializeField] private float logoBumpDuration = 0.5f;
-    [SerializeField] private float logoBumpScale = 1.2f;
-    [SerializeField] private AnimationCurve logoBumpCurve = AnimationCurve.EaseInOut(0, 0, 1, 1);
     
     [Header("References")]
     [SerializeField] private CanvasGroup backgroundCanvasGroup;
@@ -63,8 +59,6 @@ public class SplashScreenManager : MonoBehaviour
             if (logoRectTransform != null)
             {
                 logoOriginalScale = logoRectTransform.localScale;
-                // Start with a smaller scale
-                logoRectTransform.localScale = logoOriginalScale * 0.8f;
             }
         }
     }
@@ -126,38 +120,6 @@ public class SplashScreenManager : MonoBehaviour
         }
         
         logoCanvasGroup.alpha = 1f;
-        
-        // Wait before starting the bump animation
-        yield return new WaitForSeconds(delayBeforeBump);
-        
-        // Bump animation for logo size
-        float bumpStartTime = Time.time;
-        
-        while (Time.time < bumpStartTime + logoBumpDuration)
-        {
-            float t = (Time.time - bumpStartTime) / logoBumpDuration;
-            float curveValue = logoBumpCurve.Evaluate(t);
-            
-            // First half: scale up to bump size
-            if (t < 0.5f)
-            {
-                float scaleT = t * 2; // Normalize to 0-1 for first half
-                float scaleFactor = Mathf.Lerp(0.8f, logoBumpScale, scaleT);
-                logoRectTransform.localScale = logoOriginalScale * scaleFactor;
-            }
-            // Second half: scale back to original
-            else
-            {
-                float scaleT = (t - 0.5f) * 2; // Normalize to 0-1 for second half
-                float scaleFactor = Mathf.Lerp(logoBumpScale, 1.0f, scaleT);
-                logoRectTransform.localScale = logoOriginalScale * scaleFactor;
-            }
-            
-            yield return null;
-        }
-        
-        // Ensure we end at the exact original scale
-        logoRectTransform.localScale = logoOriginalScale;
     }
     
     private IEnumerator FadeOut()
