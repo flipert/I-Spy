@@ -13,6 +13,7 @@ GameObject:
   - component: {fileID: 23122214862163336}
   - component: {fileID: 6459076211016210803}
   - component: {fileID: 7223358553281013822}
+  - component: {fileID: 3970802669875603966}
   m_Layer: 0
   m_Name: house_gelateria
   m_TagString: Untagged
@@ -124,3 +125,18 @@ MonoBehaviour:
   fadeDistance: 2
   autoFindCamera: 1
   buildingRenderers: []
+--- !u!114 &3970802669875603966
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1951416149581982}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: efdcb263bdcab43aa8668c2bbe9cc8ab, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  buildingTag: Building
+  blockPlayer: 1
+  blockNPC: 1

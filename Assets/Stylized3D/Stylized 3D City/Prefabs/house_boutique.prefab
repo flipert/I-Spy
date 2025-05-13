@@ -13,6 +13,7 @@ GameObject:
   - component: {fileID: 23454189817563352}
   - component: {fileID: 4660375546198866112}
   - component: {fileID: 1229828725364419983}
+  - component: {fileID: 9080958692511192744}
   m_Layer: 0
   m_Name: house_boutique
   m_TagString: Untagged
@@ -124,3 +125,18 @@ MonoBehaviour:
   fadeDistance: 2
   autoFindCamera: 1
   buildingRenderers: []
+--- !u!114 &9080958692511192744
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1750809238901198}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: efdcb263bdcab43aa8668c2bbe9cc8ab, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  buildingTag: Building
+  blockPlayer: 1
+  blockNPC: 1

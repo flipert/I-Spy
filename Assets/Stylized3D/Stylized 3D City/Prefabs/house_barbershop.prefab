@@ -96,6 +96,7 @@ GameObject:
   - component: {fileID: 23835638209904444}
   - component: {fileID: 2540704037546425439}
   - component: {fileID: 5501365767927802214}
+  - component: {fileID: 8130386707681341360}
   m_Layer: 0
   m_Name: house_barbershop
   m_TagString: Untagged
@@ -209,6 +210,21 @@ MonoBehaviour:
   fadeDistance: 2
   autoFindCamera: 1
   buildingRenderers: []
+--- !u!114 &8130386707681341360
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1932438511778760}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: efdcb263bdcab43aa8668c2bbe9cc8ab, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  buildingTag: Building
+  blockPlayer: 1
+  blockNPC: 1
 --- !u!1 &1957897543960638
 GameObject:
   m_ObjectHideFlags: 0

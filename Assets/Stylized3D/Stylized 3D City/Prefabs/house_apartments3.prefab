@@ -13,6 +13,7 @@ GameObject:
   - component: {fileID: 23221088057446272}
   - component: {fileID: 1804238506436869827}
   - component: {fileID: 1516464022926942771}
+  - component: {fileID: 158616619296696865}
   m_Layer: 0
   m_Name: house_apartments3
   m_TagString: Untagged
@@ -124,3 +125,18 @@ MonoBehaviour:
   fadeDistance: 2
   autoFindCamera: 1
   buildingRenderers: []
+--- !u!114 &158616619296696865
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1153095940691938}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: efdcb263bdcab43aa8668c2bbe9cc8ab, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  buildingTag: Building
+  blockPlayer: 1
+  blockNPC: 1

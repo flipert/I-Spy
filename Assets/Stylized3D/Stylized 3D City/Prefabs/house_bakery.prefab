@@ -13,6 +13,7 @@ GameObject:
   - component: {fileID: 23303984245652484}
   - component: {fileID: 4047560976580521944}
   - component: {fileID: 6353670324278035369}
+  - component: {fileID: 3260796074167184197}
   m_Layer: 0
   m_Name: house_bakery
   m_TagString: Untagged
@@ -124,3 +125,18 @@ MonoBehaviour:
   fadeDistance: 2
   autoFindCamera: 1
   buildingRenderers: []
+--- !u!114 &3260796074167184197
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1661416878160078}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: efdcb263bdcab43aa8668c2bbe9cc8ab, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  buildingTag: Building
+  blockPlayer: 1
+  blockNPC: 1
