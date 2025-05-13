@@ -2309,7 +2309,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: -0.58, z: 0}
-  m_LocalScale: {x: 0.5, y: 0.5, z: 0.5}
+  m_LocalScale: {x: 0.65, y: 0.65, z: 0.65}
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 1174159209}
@@ -9446,11 +9446,11 @@ Camera:
     y: 0
     width: 1
     height: 1
-  near clip plane: 0
+  near clip plane: -222
   far clip plane: 1000
   field of view: 60
   orthographic: 1
-  orthographic size: 3.25
+  orthographic size: 1.9
   m_Depth: -1
   m_CullingMask:
     serializedVersion: 2
@@ -9494,7 +9494,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   target: {fileID: 657204650503495020, guid: 8323979c5d37e47d9867e3d8461d53c8, type: 3}
-  offset: {x: 1.9, y: 2.1, z: -4.5}
+  offset: {x: 1.9, y: -0.6, z: -2.8}
   smoothSpeed: 0.1
   lookAtTarget: 1
   followStyle: 3
@@ -9503,6 +9503,8 @@ MonoBehaviour:
   fixedHeight: 1
   fixedHeightValue: 10
   topDownFollow: 1
+  rotationAngle: 45
+  rotationSpeed: 5
 --- !u!82 &963194230
 AudioSource:
   m_ObjectHideFlags: 0

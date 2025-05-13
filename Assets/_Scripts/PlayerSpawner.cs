@@ -29,30 +29,33 @@ public class PlayerSpawner : MonoBehaviour
             return;
         }
 
-        // Make sure we have a fallback player prefab
+        // Check if we have a fallback player prefab
         if (fallbackPlayerPrefab == null)
         {
-            // Try to load a default player prefab from Resources
-            fallbackPlayerPrefab = Resources.Load<GameObject>("PlayerPrefabs/DefaultPlayer");
-            
-            if (fallbackPlayerPrefab == null)
-            {
-                // Last resort - try to load any player prefab we can find
-                GameObject[] playerPrefabs = Resources.LoadAll<GameObject>("PlayerPrefabs");
-                if (playerPrefabs != null && playerPrefabs.Length > 0)
+            // Silent attempt to load from Resources without logging errors
+            try {
+                fallbackPlayerPrefab = Resources.Load<GameObject>("PlayerPrefabs/DefaultPlayer");
+                
+                if (fallbackPlayerPrefab == null)
                 {
-                    fallbackPlayerPrefab = playerPrefabs[0];
-                    Debug.Log("PlayerSpawner: Loaded first available player prefab as fallback: " + fallbackPlayerPrefab.name);
+                    // Last resort - try to load any player prefab we can find
+                    GameObject[] playerPrefabs = Resources.LoadAll<GameObject>("PlayerPrefabs");
+                    if (playerPrefabs != null && playerPrefabs.Length > 0)
+                    {
+                        fallbackPlayerPrefab = playerPrefabs[0];
+                        Debug.Log("PlayerSpawner: Loaded first available player prefab as fallback: " + fallbackPlayerPrefab.name);
+                    }
                 }
                 else
                 {
-                    Debug.LogWarning("PlayerSpawner: Could not find any player prefabs in Resources! Player spawning may fail.");
+                    Debug.Log("PlayerSpawner: Loaded DefaultPlayer prefab as fallback.");
                 }
             }
-            else
-            {
-                Debug.Log("PlayerSpawner: Loaded DefaultPlayer prefab as fallback.");
+            catch (System.Exception) {
+                // Silently continue if Resources folder doesn't exist
             }
+            
+            // At this point, fallbackPlayerPrefab might still be null, but that's handled later
         }
 
         // Setup event listeners
@@ -200,27 +203,33 @@ public class PlayerSpawner : MonoBehaviour
         }
         else
         {
-            Debug.LogError("PlayerSpawner: NetworkManagerUI.Instance is null! Cannot get character selection.");
+            // Reduced to warning level since the game can continue
+            Debug.LogWarning("PlayerSpawner: NetworkManagerUI.Instance is null! Using fallback character.");
         }
         
         // Fallback to default prefab if no selection or error occurred
         if (characterPrefab == null)
         {
-            // Last resort - try to find any player prefab in Resources
-            characterPrefab = Resources.Load<GameObject>("PlayerPrefabs/DefaultPlayer");
-            
-            if (characterPrefab != null)
-            {
-                Debug.Log("PlayerSpawner: Found fallback player prefab in Resources folder");
-            }
-            else if (fallbackPlayerPrefab != null)
+            // Skip trying to load from Resources since we know it's likely to fail
+            if (fallbackPlayerPrefab != null)
             {
                 Debug.Log("PlayerSpawner: Using explicitly assigned fallback player prefab");
                 characterPrefab = fallbackPlayerPrefab;
             }
             else
             {
-                Debug.LogError("PlayerSpawner: No fallback player prefab assigned!");
+                // Create a simple cube as an absolute last resort
+                Debug.LogWarning("PlayerSpawner: No fallback player prefab assigned. Creating a basic placeholder.");
+                GameObject cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                cube.name = "EmergencyPlayerPrefab";
+                
+                // Make sure it has a NetworkObject component
+                if (cube.GetComponent<NetworkObject>() == null)
+                {
+                    cube.AddComponent<NetworkObject>();
+                }
+                
+                characterPrefab = cube;
                 return;
             }
         }

@@ -55,9 +55,11 @@ public class NetworkManagerUI : MonoBehaviour
         {
             Instance = this;
             DontDestroyOnLoad(gameObject);
+            Debug.Log("NetworkManagerUI: Instance created and set to DontDestroyOnLoad");
         }
         else if (Instance != this)
         {
+            Debug.Log("NetworkManagerUI: Duplicate instance found, destroying this one");
             Destroy(gameObject);
             return;
         }

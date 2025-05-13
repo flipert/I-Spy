@@ -38,8 +38,19 @@ public class CameraFollow : MonoBehaviour
     [Tooltip("If true, camera will only follow on X and Z axes")]
     public bool topDownFollow = true;
     
+    [Header("Rotation Settings")]
+    [Tooltip("Rotation angle in degrees when pressing E or Q")]
+    public float rotationAngle = 45f;
+    
+    [Tooltip("How quickly the camera rotates to the new angle")]
+    public float rotationSpeed = 5f;
+    
     // Current velocity for SmoothDamp
     private Vector3 currentVelocity = Vector3.zero;
+    
+    // Current and target rotation angles
+    private float currentRotationAngle = 0f;
+    private float targetRotationAngle = 0f;
     
     // Enum for different follow styles
     public enum FollowStyle
@@ -192,18 +203,29 @@ public class CameraFollow : MonoBehaviour
         {
             return; // Skip camera movement if target is null
         }
+        
+        // Handle rotation input from E and Q keys
+        HandleRotationInput();
 
+        // Get the target position (with rotation applied)
+        Vector3 targetPosition = GetTargetPosition();
+        
         // Continue with camera movement logic
         switch (followStyle)
         {
             case FollowStyle.Instant:
-                UpdateCameraPosition(1f);
+                // Instantly move to the target position
+                transform.position = targetPosition;
                 break;
             case FollowStyle.SmoothFollow:
-                UpdateCameraPosition(smoothSpeed);
+                // Smoothly move to the target position using Lerp
+                transform.position = Vector3.Lerp(
+                    transform.position, 
+                    targetPosition, 
+                    smoothSpeed * Time.deltaTime * 10f);
                 break;
             case FollowStyle.SmoothDamp:
-                Vector3 targetPosition = GetTargetPosition();
+                // Smoothly move to the target position using SmoothDamp
                 transform.position = Vector3.SmoothDamp(
                     transform.position, 
                     targetPosition, 
@@ -211,30 +233,22 @@ public class CameraFollow : MonoBehaviour
                     positionDamping);
                 break;
             case FollowStyle.FixedOffset:
-                transform.position = target.position + offset;
+                // Use the rotated offset for fixed offset mode too
+                transform.position = targetPosition;
                 break;
         }
 
-        // Make the camera look at the target if enabled
-        if (lookAtTarget && target != null)
+        // Always make the camera look at the target
+        // This is simpler and works better with the orbital rotation
+        if (target != null)
         {
-            if (rotationDamping > 0)
-            {
-                // Smooth rotation
-                Quaternion targetRotation = Quaternion.LookRotation(target.position - transform.position);
-                transform.rotation = Quaternion.Slerp(
-                    transform.rotation, 
-                    targetRotation, 
-                    Time.deltaTime / rotationDamping);
-            }
-            else
-            {
-                // Instant rotation
-                transform.LookAt(target);
-            }
+            // Simply look at the target
+            transform.LookAt(target.position);
         }
     }
     
+    // This method is no longer needed as we've moved the logic directly into the Update method
+    // Keeping it for backward compatibility
     private void UpdateCameraPosition(float speed)
     {
         if (target == null) return;
@@ -247,7 +261,26 @@ public class CameraFollow : MonoBehaviour
     {
         if (target == null) return transform.position; // Return current position if target is null
         
-        Vector3 targetPos = target.position + offset;
+        // Calculate distance from target (length of offset)
+        float distance = offset.magnitude;
+        
+        // Calculate the angle in radians
+        float angleRad = currentRotationAngle * Mathf.Deg2Rad;
+        
+        // Calculate the new position using orbit calculation
+        // Start with the original offset direction
+        float originalYaw = Mathf.Atan2(offset.z, offset.x);
+        
+        // Add the rotation angle to the original yaw
+        float newYaw = originalYaw + angleRad;
+        
+        // Calculate the new X and Z positions
+        float newX = Mathf.Cos(newYaw) * distance;
+        float newZ = Mathf.Sin(newYaw) * distance;
+        
+        // Keep the original Y offset
+        Vector3 rotatedOffset = new Vector3(newX, offset.y, newZ);
+        Vector3 targetPos = target.position + rotatedOffset;
         
         // Maintain fixed height if enabled
         if (fixedHeight)
@@ -262,6 +295,48 @@ public class CameraFollow : MonoBehaviour
         }
         
         return targetPos;
+    }
+    
+    // Rotate a vector around the Y axis
+    private Vector3 RotateVectorAroundY(Vector3 vector, float degrees)
+    {
+        float radians = degrees * Mathf.Deg2Rad;
+        float sin = Mathf.Sin(radians);
+        float cos = Mathf.Cos(radians);
+        
+        float newX = vector.x * cos - vector.z * sin;
+        float newZ = vector.x * sin + vector.z * cos;
+        
+        return new Vector3(newX, vector.y, newZ);
+    }
+    
+    // Handle rotation input from E and Q keys
+    private void HandleRotationInput()
+    {
+        // Check for Q key (rotate left)
+        if (Input.GetKeyDown(KeyCode.Q))
+        {
+            targetRotationAngle -= rotationAngle;
+            Debug.Log($"CameraFollow: Rotating left to {targetRotationAngle} degrees");
+        }
+        
+        // Check for E key (rotate right)
+        if (Input.GetKeyDown(KeyCode.E))
+        {
+            targetRotationAngle += rotationAngle;
+            Debug.Log($"CameraFollow: Rotating right to {targetRotationAngle} degrees");
+        }
+        
+        // Smoothly interpolate to the target rotation angle
+        // Using a stronger interpolation factor to make the rotation more noticeable
+        currentRotationAngle = Mathf.Lerp(currentRotationAngle, targetRotationAngle, Time.deltaTime * rotationSpeed * 2f);
+        
+        // Force an immediate update when the rotation changes significantly
+        if (Mathf.Abs(targetRotationAngle - currentRotationAngle) > 1f)
+        {
+            // This helps ensure the camera position updates right away
+            transform.position = GetTargetPosition();
+        }
     }
     
     // Public method to change the target at runtime
