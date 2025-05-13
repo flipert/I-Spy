@@ -373,8 +373,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   transparentOpacity: 15
   normalOpacity: 100
-  transitionSpeed: 5
-  fadeDistance: 2
+  transitionSpeed: 10
+  fadeDistance: 4
   autoFindCamera: 1
   buildingRenderers:
   - {fileID: 23569162578321578}

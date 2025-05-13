@@ -1,14 +1,11 @@
 using UnityEngine;
 using Unity.Netcode;
-using System.Collections;
 
 public class PlayerController : NetworkBehaviour
 {
     [Header("Movement Settings")]
     public float moveSpeed = 5f;
     public float runMultiplier = 2f;
-    [Tooltip("Tag used to identify buildings that player should not pass through")]
-    public string buildingTag = "Building";
 
     [Header("Stamina Settings")]
     public float maxStamina = 100f;         // Max stamina
@@ -122,75 +119,10 @@ public class PlayerController : NetworkBehaviour
             }
 
             // Create movement vector using X and Z axes (keeping Y the same)
-            Vector3 inputDirection = new Vector3(moveX, 0, moveZ).normalized;
-            Vector3 movement = inputDirection; // Default to input direction if no camera is found
-            Vector3 proposedPosition = transform.position;
+            Vector3 movement = new Vector3(moveX, 0, moveZ).normalized;
             
-            // Convert input direction to be relative to camera orientation
-            Camera mainCamera = Camera.main;
-            if (mainCamera != null && inputDirection.magnitude > 0)
-            {
-                // Get the camera's forward and right vectors, but ignore Y component (keep movement on ground plane)
-                Vector3 cameraForward = mainCamera.transform.forward;
-                cameraForward.y = 0;
-                cameraForward.Normalize();
-                
-                Vector3 cameraRight = mainCamera.transform.right;
-                cameraRight.y = 0;
-                cameraRight.Normalize();
-                
-                // Calculate the movement direction relative to camera
-                movement = (cameraForward * inputDirection.z + cameraRight * inputDirection.x).normalized;
-                
-                // Update character facing direction based on movement
-                if (movement.x != 0)
-                {
-                    isFacingLeft = (movement.x < 0);
-                }
-            }
-            
-            // Calculate the proposed new position
-            if (movement.magnitude > 0)
-            {
-                proposedPosition = transform.position + movement * currentSpeed * Time.deltaTime;
-            }
-            
-            // Check for collisions before moving
-            if (movement.magnitude > 0)
-            {
-                // Cast a ray in the movement direction to check for obstacles
-                RaycastHit hit;
-                float rayDistance = currentSpeed * Time.deltaTime * 1.5f; // Look slightly ahead
-                bool hitObstacle = Physics.Raycast(transform.position, movement, out hit, rayDistance);
-                
-                // Only move if we won't hit a building
-                if (!hitObstacle || !hit.collider.CompareTag(buildingTag))
-                {
-                    // Apply movement
-                    transform.position = proposedPosition;
-                }
-                else
-                {
-                    // We hit a building, try to slide along it
-                    Vector3 reflectionDirection = Vector3.Reflect(movement, hit.normal);
-                    reflectionDirection.y = 0; // Keep movement on the ground plane
-                    
-                    // Try moving along the wall
-                    Vector3 slideDirection = Vector3.Cross(hit.normal, Vector3.up).normalized;
-                    if (Vector3.Dot(movement, slideDirection) < 0)
-                    {
-                        slideDirection = -slideDirection;
-                    }
-                    
-                    // Check if we can slide in this direction
-                    bool canSlide = !Physics.Raycast(transform.position, slideDirection, rayDistance);
-                    if (canSlide)
-                    {
-                        // Apply sliding movement
-                        transform.position += slideDirection * currentSpeed * Time.deltaTime * 0.8f;
-                    }
-                }
-            }
+            // Apply movement
+            transform.position += movement * currentSpeed * Time.deltaTime;
 
             // Update animator if we have one
             if (animator != null)
@@ -198,28 +130,11 @@ public class PlayerController : NetworkBehaviour
                 animator.SetBool("Running", isMoving);
             }
 
-            // Make the character sprite always face the camera (billboarding)
-            if (characterSprite != null && mainCamera != null)
+            // Update sprite direction if we have a sprite renderer
+            if (characterSprite != null && moveX != 0)
             {
-                // Get the character transform (parent of the sprite)
-                Transform characterTransform = characterSprite.transform;
-                
-                // Get the camera's Y rotation
-                float cameraYRotation = mainCamera.transform.rotation.eulerAngles.y;
-                
-                // Set the character's rotation to match camera's Y rotation
-                characterTransform.rotation = Quaternion.Euler(0, cameraYRotation, 0);
-                
-                // Still use flipX for left/right movement direction
+                isFacingLeft = (moveX < 0);
                 characterSprite.flipX = isFacingLeft;
-                
-                // Find and handle the shadow object
-                Transform shadowTransform = transform.Find("Shadow");
-                if (shadowTransform != null)
-                {
-                    // Keep the shadow flat on the ground (no rotation)
-                    shadowTransform.rotation = Quaternion.Euler(90, 0, 0);
-                }
             }
 
             // Update network variables to sync with other clients
@@ -299,9 +214,19 @@ public class PlayerController : NetworkBehaviour
         {
             Debug.Log($"PlayerController: Local player spawned at {transform.position}");
             
-            // Start a coroutine to find and set up the camera with retries
-            StartCoroutine(FindAndSetupCamera());
-            
+            // Find the main camera and set its target to this player
+            CameraFollow cameraFollow = Camera.main?.GetComponent<CameraFollow>();
+            if (cameraFollow != null)
+            {
+                Debug.Log("PlayerController: Found CameraFollow, setting target");
+                cameraFollow.SetTarget(transform);
+                cameraFollow.ResetCameraPosition();
+            }
+            else
+            {
+                Debug.LogWarning("PlayerController: Could not find CameraFollow component on main camera");
+            }
+
             // Find the stamina bar UI element in the scene using its tag
             GameObject staminaBarObject = GameObject.FindGameObjectWithTag("StaminaBarFill"); // Make sure this tag exists and is assigned in the scene
             if (staminaBarObject != null)
@@ -493,104 +418,6 @@ public class PlayerController : NetworkBehaviour
         }
     }
 
-    // Coroutine to find and set up the camera with retries
-    private IEnumerator FindAndSetupCamera()
-    {
-        int maxRetries = 5;
-        int retryCount = 0;
-        float retryDelay = 0.5f;
-        bool cameraFound = false;
-        
-        // Wait a moment for the scene to fully load
-        yield return new WaitForSeconds(0.2f);
-        
-        while (!cameraFound && retryCount < maxRetries)
-        {
-            // First try Camera.main
-            Camera mainCamera = Camera.main;
-            if (mainCamera != null)
-            {
-                // Try to find ThirdPersonCamera
-                ThirdPersonCamera thirdPersonCamera = mainCamera.GetComponent<ThirdPersonCamera>();
-                if (thirdPersonCamera != null)
-                {
-                    Debug.Log("PlayerController: Found ThirdPersonCamera on Camera.main, setting target");
-                    thirdPersonCamera.SetTarget(transform);
-                    thirdPersonCamera.ResetCameraPosition();
-                    cameraFound = true;
-                    yield break;
-                }
-                
-                // Try to find CameraFollow
-                CameraFollow cameraFollow = mainCamera.GetComponent<CameraFollow>();
-                if (cameraFollow != null)
-                {
-                    Debug.Log("PlayerController: Found CameraFollow on Camera.main, setting target");
-                    cameraFollow.SetTarget(transform);
-                    cameraFollow.ResetCameraPosition();
-                    cameraFound = true;
-                    yield break;
-                }
-            }
-            
-            // If Camera.main failed, try FindObjectOfType
-            ThirdPersonCamera[] allThirdPersonCameras = FindObjectsOfType<ThirdPersonCamera>();
-            if (allThirdPersonCameras.Length > 0)
-            {
-                Debug.Log("PlayerController: Found ThirdPersonCamera using FindObjectsOfType, setting target");
-                allThirdPersonCameras[0].SetTarget(transform);
-                allThirdPersonCameras[0].ResetCameraPosition();
-                cameraFound = true;
-                yield break;
-            }
-            
-            CameraFollow[] allCameraFollows = FindObjectsOfType<CameraFollow>();
-            if (allCameraFollows.Length > 0)
-            {
-                Debug.Log("PlayerController: Found CameraFollow using FindObjectsOfType, setting target");
-                allCameraFollows[0].SetTarget(transform);
-                allCameraFollows[0].ResetCameraPosition();
-                cameraFound = true;
-                yield break;
-            }
-            
-            // Try cameras with specific tags
-            GameObject taggedCamera = GameObject.FindGameObjectWithTag("MainCamera");
-            if (taggedCamera != null)
-            {
-                ThirdPersonCamera taggedThirdPersonCamera = taggedCamera.GetComponent<ThirdPersonCamera>();
-                if (taggedThirdPersonCamera != null)
-                {
-                    Debug.Log("PlayerController: Found ThirdPersonCamera using tag, setting target");
-                    taggedThirdPersonCamera.SetTarget(transform);
-                    taggedThirdPersonCamera.ResetCameraPosition();
-                    cameraFound = true;
-                    yield break;
-                }
-                
-                CameraFollow taggedCameraFollow = taggedCamera.GetComponent<CameraFollow>();
-                if (taggedCameraFollow != null)
-                {
-                    Debug.Log("PlayerController: Found CameraFollow using tag, setting target");
-                    taggedCameraFollow.SetTarget(transform);
-                    taggedCameraFollow.ResetCameraPosition();
-                    cameraFound = true;
-                    yield break;
-                }
-            }
-            
-            // If we get here, no camera was found this attempt
-            retryCount++;
-            Debug.Log($"PlayerController: Camera not found, retry {retryCount}/{maxRetries}");
-            yield return new WaitForSeconds(retryDelay);
-        }
-        
-        if (!cameraFound)
-        {
-            Debug.LogWarning("PlayerController: Could not find either ThirdPersonCamera or CameraFollow component after multiple attempts");
-        }
-    }
-    
     // Helper method to find a player by their network ID
     private PlayerController GetPlayerByNetworkId(ulong networkId)
     {

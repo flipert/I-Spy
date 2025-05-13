@@ -12,8 +12,6 @@ public class NPCController : NetworkBehaviour
     public Vector3 allowedAreaSize = new Vector3(10f, 0, 10f);
     [Tooltip("List of GameObjects that contain BoxColliders which the NPC should avoid entering")]
     public GameObject[] forbiddenAreaObjects;
-    [Tooltip("Tag used to identify buildings that NPCs should avoid")]
-    public string buildingTag = "Building";
 
     [Header("Movement Settings")]
     [Tooltip("Walking speed of the NPC")]
@@ -150,18 +148,6 @@ public class NPCController : NetworkBehaviour
         {
             forbiddenAreaObjects = GameObject.FindGameObjectsWithTag("Boundary");
         }
-        
-        // Also add buildings to forbidden areas
-        GameObject[] buildingObjects = GameObject.FindGameObjectsWithTag(buildingTag);
-        if (buildingObjects.Length > 0)
-        {
-            // Create a new array that combines both boundary and building objects
-            GameObject[] combinedForbiddenAreas = new GameObject[forbiddenAreaObjects.Length + buildingObjects.Length];
-            forbiddenAreaObjects.CopyTo(combinedForbiddenAreas, 0);
-            buildingObjects.CopyTo(combinedForbiddenAreas, forbiddenAreaObjects.Length);
-            forbiddenAreaObjects = combinedForbiddenAreas;
-            Debug.Log($"NPCController: Added {buildingObjects.Length} buildings to forbidden areas");
-        }
 
         if (tintColors != null && tintColors.Length > 0)
         {
@@ -233,43 +219,12 @@ public class NPCController : NetworkBehaviour
         }
     }
     
-    private void OnSpriteFlipChanged(bool previous, bool current)
+    private void OnSpriteFlipChanged(bool previousValue, bool newValue)
     {
         SpriteRenderer spriteR = npcRenderer as SpriteRenderer;
         if (spriteR != null)
         {
-            spriteR.flipX = current;
-        }
-    }
-    
-    // Add LateUpdate to ensure NPCs always face the camera, even on clients
-    private void LateUpdate()
-    {
-        // Make the NPC sprite always face the camera (billboarding)
-        SpriteRenderer spriteR = npcRenderer as SpriteRenderer;
-        if(spriteR != null)
-        {
-            // Get the main camera
-            Camera mainCamera = Camera.main;
-            if (mainCamera != null)
-            {
-                // Get the character transform (parent of the sprite)
-                Transform characterTransform = spriteR.transform;
-                
-                // Get the camera's Y rotation
-                float cameraYRotation = mainCamera.transform.rotation.eulerAngles.y;
-                
-                // Set the character's rotation to match camera's Y rotation
-                characterTransform.rotation = Quaternion.Euler(0, cameraYRotation, 0);
-                
-                // Find and handle the shadow object
-                Transform shadowTransform = transform.Find("Shadow");
-                if (shadowTransform != null)
-                {
-                    // Keep the shadow flat on the ground (no rotation)
-                    shadowTransform.rotation = Quaternion.Euler(90, 0, 0);
-                }
-            }
+            spriteR.flipX = newValue;
         }
     }
 
@@ -322,25 +277,10 @@ public class NPCController : NetworkBehaviour
         {
             if (obj != null)
             {
-                // Check for any type of collider, not just BoxCollider
-                Collider area = obj.GetComponent<Collider>();
-                if (area != null)
+                BoxCollider area = obj.GetComponent<BoxCollider>();
+                if (area != null && area.bounds.Contains(point))
                 {
-                    // For box colliders, use bounds.Contains
-                    if (area is BoxCollider && area.bounds.Contains(point))
-                    {
-                        return true;
-                    }
-                    // For other collider types, use ClosestPoint to check if point is inside or very close
-                    else
-                    {
-                        Vector3 closestPoint = area.ClosestPoint(point);
-                        float distance = Vector3.Distance(point, closestPoint);
-                        if (distance < 0.1f) // If point is inside or very close to collider
-                        {
-                            return true;
-                        }
-                    }
+                    return true;
                 }
             }
         }
@@ -374,24 +314,10 @@ public class NPCController : NetworkBehaviour
                     // Compute movement direction towards the destination
                     Vector3 direction = (currentDestination - transform.position).normalized;
 
-                    // Cast a ray in the movement direction to check for obstacles
-                    RaycastHit hit;
-                    float rayDistance = walkSpeed * Time.deltaTime * 2.0f; // Look slightly ahead
-                    bool hitObstacle = Physics.Raycast(transform.position, direction, out hit, rayDistance);
-                    
                     // Compute proposed new position
                     Vector3 proposedPos = transform.position + direction * walkSpeed * Time.deltaTime;
-                    
-                    // Check if we would hit a building or enter a forbidden area
-                    if(hitObstacle && (hit.collider.CompareTag(buildingTag) || hit.collider.CompareTag("Boundary")))
-                    {
-                        // We're about to hit a building or boundary, pick a new destination
-                        Debug.Log($"NPC avoiding obstacle: {hit.collider.gameObject.name}");
-                        PickNewDestination();
-                    }
-                    // If the proposed position is NOT in a forbidden area, move there
-                    else if(!IsPointInForbiddenArea(proposedPos)) 
-                    {
+                    // If the proposed position is NOT in a forbidden area, move there; otherwise, choose a new destination
+                    if(!IsPointInForbiddenArea(proposedPos)) {
                         transform.position = proposedPos;
                         networkPosition.Value = proposedPos;
                         
@@ -399,32 +325,10 @@ public class NPCController : NetworkBehaviour
                         SpriteRenderer spriteR = npcRenderer as SpriteRenderer;
                         if(spriteR != null && Mathf.Abs(direction.x) > 0.01f)
                         {
-                            bool shouldFlipX = (direction.x < 0);
-                            spriteR.flipX = shouldFlipX;
-                            networkSpriteFlipX.Value = shouldFlipX;
+                            spriteR.flipX = (direction.x < 0);
+                            networkSpriteFlipX.Value = (direction.x < 0);
                         }
-                        
-                        // Make the NPC sprite always face the camera (billboarding)
-                        if(spriteR != null)
-                        {
-                            // Get the main camera
-                            Camera mainCamera = Camera.main;
-                            if (mainCamera != null)
-                            {
-                                // Get the character transform (parent of the sprite)
-                                Transform characterTransform = spriteR.transform;
-                                
-                                // Get the camera's Y rotation
-                                float cameraYRotation = mainCamera.transform.rotation.eulerAngles.y;
-                                
-                                // Set the character's rotation to match camera's Y rotation
-                                characterTransform.rotation = Quaternion.Euler(0, cameraYRotation, 0);
-                            }
-                        }
-                    } 
-                    else 
-                    {
-                        // We're about to enter a forbidden area, pick a new destination
+                    } else {
                         PickNewDestination();
                     }
                 }
