@@ -231,15 +231,40 @@ public class NPCController : NetworkBehaviour
         }
     }
     
-    // Make sprites face the camera (billboard effect)
+    // Make sprites face the camera (billboard effect) while maintaining correct movement direction
     private void MakeSpritesFaceCamera()
     {
         SpriteRenderer spriteR = npcRenderer as SpriteRenderer;
-        if (spriteR != null && spriteR.transform != null)
+        if (spriteR != null && spriteR.transform != null && Camera.main != null)
         {
-            // Make the sprite face the camera
-            spriteR.transform.rotation = Camera.main != null ? 
-                Quaternion.LookRotation(Camera.main.transform.forward) : Quaternion.identity;
+            // Make the sprite face the camera (billboard effect)
+            spriteR.transform.rotation = Quaternion.LookRotation(Camera.main.transform.forward);
+            
+            // If the NPC is moving, update flipX based on movement direction relative to camera view
+            if (networkIsMoving.Value && IsServer)
+            {
+                // Calculate movement direction in world space
+                Vector3 movementDir = Vector3.zero;
+                if (!inGroup)
+                {
+                    // Regular movement - direction is toward destination
+                    movementDir = (currentDestination - transform.position).normalized;
+                }
+                else
+                {
+                    // Group movement - direction is toward formation position
+                    movementDir = (formationTargetPos - transform.position).normalized;
+                }
+                
+                // Project movement direction onto camera's right vector to determine if moving left or right relative to camera view
+                float movementDot = Vector3.Dot(movementDir, Camera.main.transform.right);
+                
+                // Update flipX based on relative movement direction
+                if (Mathf.Abs(movementDot) > 0.01f) // Only update if there's significant horizontal movement
+                {
+                    networkSpriteFlipX.Value = (movementDot < 0); // Flip if moving left relative to camera
+                }
+            }
         }
     }
 
@@ -336,16 +361,8 @@ public class NPCController : NetworkBehaviour
                         transform.position = proposedPos;
                         networkPosition.Value = proposedPos;
                         
-                        // Flip sprite horizontally based on the movement direction if using a SpriteRenderer
-                        SpriteRenderer spriteR = npcRenderer as SpriteRenderer;
-                        if(spriteR != null && Mathf.Abs(direction.x) > 0.01f)
-                        {
-                            spriteR.flipX = (direction.x < 0);
-                            networkSpriteFlipX.Value = (direction.x < 0);
-                            
-                            // Make the sprite face the camera
-                            MakeSpritesFaceCamera();
-                        }
+                        // Make the sprite face the camera - this will handle both billboard effect and proper sprite orientation
+                        MakeSpritesFaceCamera();
                     } else {
                         PickNewDestination();
                     }
@@ -454,9 +471,23 @@ public class NPCController : NetworkBehaviour
         }
         
         // Always make sprites face the camera
-        if (!IsServer) // Only needed on clients since server updates are sent via network
+        if (IsServer)
         {
+            // Server updates sprite orientation and sends to clients
             MakeSpritesFaceCamera();
+        }
+        else
+        {
+            // Clients only need to apply the billboard effect without changing flipX
+            SpriteRenderer spriteR = npcRenderer as SpriteRenderer;
+            if (spriteR != null && spriteR.transform != null && Camera.main != null)
+            {
+                // Apply billboard effect
+                spriteR.transform.rotation = Quaternion.LookRotation(Camera.main.transform.forward);
+                
+                // Apply the network-synced flipX value
+                spriteR.flipX = networkSpriteFlipX.Value;
+            }
         }
     }
 
@@ -478,15 +509,8 @@ public class NPCController : NetworkBehaviour
             // Compute direction towards the formation target
             Vector3 groupDirection = (formationTargetPos - transform.position).normalized;
             
-            // Flip sprite based on x direction if using a SpriteRenderer
-            SpriteRenderer spriteR = npcRenderer as SpriteRenderer;
-            if(spriteR != null && Mathf.Abs(groupDirection.x) > 0.01f) {
-                spriteR.flipX = (groupDirection.x < 0);
-                networkSpriteFlipX.Value = (groupDirection.x < 0);
-                
-                // Make the sprite face the camera
-                MakeSpritesFaceCamera();
-            }
+            // Make the sprite face the camera - this will handle both billboard effect and proper sprite orientation
+            MakeSpritesFaceCamera();
         } 
         else {
             // Reached formation position
@@ -513,16 +537,19 @@ public class NPCController : NetworkBehaviour
                 foreach(var member in groupMembers){ groupCenter += member.transform.position; }
                 groupCenter /= groupMembers.Count;
                 
-                // Face toward center
+                // When stationary in group, face toward center
                 Vector3 directionToCenter = (groupCenter - transform.position).normalized;
+                
+                // Project direction to center onto camera's right vector
+                float directionDot = Vector3.Dot(directionToCenter, Camera.main.transform.right);
+                
                 SpriteRenderer spriteR = npcRenderer as SpriteRenderer;
-                if(spriteR != null && Mathf.Abs(directionToCenter.x) > 0.01f) {
-                    spriteR.flipX = (directionToCenter.x < 0);
-                    networkSpriteFlipX.Value = (directionToCenter.x < 0);
-                    
-                    // Make the sprite face the camera
-                    MakeSpritesFaceCamera();
+                if(spriteR != null && Mathf.Abs(directionDot) > 0.01f) {
+                    networkSpriteFlipX.Value = (directionDot < 0);
                 }
+                
+                // Make the sprite face the camera
+                MakeSpritesFaceCamera();
             }
         }
 
