@@ -362,7 +362,10 @@ public class NPCController : NetworkBehaviour
 
             if (!inGroup)
             {
-                float distance = Vector3.Distance(transform.position, currentDestination);
+                // Current position for calculations, preferring Rigidbody's position
+                Vector3 currentActualPosition = (rb != null) ? rb.position : transform.position;
+                
+                float distance = Vector3.Distance(currentActualPosition, currentDestination);
                 if (distance < destinationTolerance)
                 {
                     // Update network moving state
@@ -377,11 +380,11 @@ public class NPCController : NetworkBehaviour
                     // Update network moving state
                     networkIsMoving.Value = true;
                     
-                    // Compute movement direction towards the destination
-                    Vector3 direction = (currentDestination - transform.position).normalized;
+                    // Compute movement direction towards the destination using currentActualPosition
+                    Vector3 direction = (currentDestination - currentActualPosition).normalized;
 
-                    // Compute proposed new position
-                    Vector3 proposedPos = transform.position + direction * walkSpeed * Time.deltaTime;
+                    // Compute proposed new position using currentActualPosition
+                    Vector3 proposedPos = currentActualPosition + direction * walkSpeed * Time.deltaTime;
                     // If the proposed position is NOT in a forbidden area, move there; otherwise, choose a new destination
                     if(!IsPointInForbiddenArea(proposedPos)) {
                         if (rb != null) rb.MovePosition(proposedPos); else transform.position = proposedPos;
