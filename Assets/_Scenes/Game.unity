@@ -1791,7 +1791,6 @@ GameObject:
   m_Component:
   - component: {fileID: 185277174}
   - component: {fileID: 185277177}
-  - component: {fileID: 185277176}
   - component: {fileID: 185277175}
   m_Layer: 0
   m_Name: OutlineCam
@@ -1822,7 +1821,7 @@ AudioSource:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 185277173}
-  m_Enabled: 1
+  m_Enabled: 0
   serializedVersion: 4
   OutputAudioMixerGroup: {fileID: 0}
   m_audioClip: {fileID: 8300000, guid: 1ed8ca0c8ac4640628f8244c17c1870d, type: 3}
@@ -1911,14 +1910,6 @@ AudioSource:
     m_PreInfinity: 2
     m_PostInfinity: 2
     m_RotationOrder: 4
---- !u!81 &185277176
-AudioListener:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 185277173}
-  m_Enabled: 1
 --- !u!20 &185277177
 Camera:
   m_ObjectHideFlags: 0
@@ -1950,7 +1941,7 @@ Camera:
     y: 0
     width: 1
     height: 1
-  near clip plane: -222
+  near clip plane: 0.01
   far clip plane: 1000
   field of view: 60
   orthographic: 1
@@ -9948,7 +9939,7 @@ Camera:
     y: 0
     width: 1
     height: 1
-  near clip plane: -222
+  near clip plane: -20
   far clip plane: 1000
   field of view: 60
   orthographic: 1
@@ -10111,7 +10102,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 963194225}
-  m_Enabled: 0
+  m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 884f17d5f5e574b64be8ff587e547b6b, type: 3}
   m_Name: 

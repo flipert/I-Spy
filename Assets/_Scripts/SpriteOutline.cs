@@ -8,6 +8,8 @@ public class SpriteOutline : MonoBehaviour
     [Tooltip("Pixel offset for the outline")] [Range(0.01f, 0.1f)]
     public float thickness = 0.03f;
 
+    [Tooltip("Force outline for debugging")] public bool forceOutlineForDebug = false;
+
     // Layer with the building colliders
     [SerializeField] private LayerMask buildingsMask;
 
@@ -46,18 +48,28 @@ public class SpriteOutline : MonoBehaviour
 
     void LateUpdate()
     {
+        // 0) Debug force toggle
+        if (forceOutlineForDebug)
+        {
+            ToggleOutline(true);
+            if (outlineParts.Length > 0 && outlineParts[0].sprite != body.sprite) UpdateOutlineSprite(); // Keep sprite updated even when forced
+            return;
+        }
+
         // 1) Always keep correct sprite (animations swap sprites every frame)
         if (outlineParts[0].sprite != body.sprite) UpdateOutlineSprite();
 
         // 2) Check if a building blocks the view
         Vector3 characterCenter = body.bounds.center;
-        Vector3 camForward = mainCam.transform.forward;
-        // Define a start point for the linecast far along the negative camera forward vector from the character
-        // This effectively casts from "behind" the character towards it, along the camera's view lines.
-        Vector3 linecastStartPoint = characterCenter - camForward * (mainCam.farClipPlane * 0.9f); // Start slightly within far clip plane
+        Vector3 screenPoint = mainCam.WorldToScreenPoint(characterCenter);
+        Ray ray = mainCam.ScreenPointToRay(screenPoint);
 
-        bool blocked = Physics.Linecast(linecastStartPoint, characterCenter, buildingsMask);
-        
+        bool blocked = Physics.Linecast(ray.origin, characterCenter, buildingsMask);
+
+        // Visualize the Linecast in the Scene view
+        Color lineColor = blocked ? Color.red : Color.green; // Red if blocked, green if not
+        Debug.DrawLine(ray.origin, characterCenter, lineColor, 0.01f);
+
         ToggleOutline(blocked);
     }
 
@@ -83,9 +95,22 @@ public class SpriteOutline : MonoBehaviour
 
     void OnValidate()
     {
-        if (outlineParts == null) return;
+        // Ensure outlineParts is initialized and has elements before proceeding.
+        // This prevents errors when the script is added or recompiled in the editor.
+        if (outlineParts == null || outlineParts.Length == 0) return;
+
+        // Also ensure that the number of outline parts matches the expected number of offsets.
+        // This can prevent errors if something unexpected changes the array size.
+        if (outlineParts.Length != offsets.Length) return; 
+
         for (int i = 0; i < offsets.Length; i++)
-            outlineParts[i].transform.localPosition = offsets[i] * thickness;
+        {
+            // Additional check for individual null elements, though less likely if Awake logic is sound.
+            if (outlineParts[i] != null && outlineParts[i].transform != null)
+            {
+                outlineParts[i].transform.localPosition = offsets[i] * thickness;
+            }
+        }
     }
 
     void Start() => OnValidate(); // apply initial offsets
