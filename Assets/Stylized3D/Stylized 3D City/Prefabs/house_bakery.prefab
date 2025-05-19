@@ -12,7 +12,6 @@ GameObject:
   - component: {fileID: 33191660643120738}
   - component: {fileID: 23303984245652484}
   - component: {fileID: 4047560976580521944}
-  - component: {fileID: 6353670324278035369}
   - component: {fileID: 3260796074167184197}
   m_Layer: 0
   m_Name: house_bakery
@@ -105,26 +104,8 @@ BoxCollider:
   m_ProvidesContacts: 0
   m_Enabled: 1
   serializedVersion: 3
-  m_Size: {x: 4.0067816, y: 6.5700407, z: 4.8483562}
-  m_Center: {x: 0.00000035762787, y: 3.264791, z: -0.3467703}
---- !u!114 &6353670324278035369
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1661416878160078}
-  m_Enabled: 0
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: caf37f8c53c7d45be995ea75b4282398, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  transparentOpacity: 30
-  normalOpacity: 100
-  transitionSpeed: 5
-  fadeDistance: 2
-  autoFindCamera: 1
-  buildingRenderers: []
+  m_Size: {x: 4.0067816, y: 6.5700407, z: 4.1747694}
+  m_Center: {x: 0.00000047683716, y: 3.264791, z: -0.009976864}
 --- !u!114 &3260796074167184197
 MonoBehaviour:
   m_ObjectHideFlags: 0

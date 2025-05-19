@@ -12,7 +12,6 @@ GameObject:
   - component: {fileID: 33151174533608446}
   - component: {fileID: 23308652009679308}
   - component: {fileID: 4042801438626484597}
-  - component: {fileID: 6501304688211471976}
   - component: {fileID: 7153874358613813673}
   m_Layer: 0
   m_Name: house_apartments7
@@ -105,26 +104,8 @@ BoxCollider:
   m_ProvidesContacts: 0
   m_Enabled: 1
   serializedVersion: 3
-  m_Size: {x: 4.0143805, y: 5.547109, z: 4.3115797}
-  m_Center: {x: 0, y: 2.7735546, z: -0.14987278}
---- !u!114 &6501304688211471976
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1493783736785330}
-  m_Enabled: 0
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: caf37f8c53c7d45be995ea75b4282398, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  transparentOpacity: 30
-  normalOpacity: 100
-  transitionSpeed: 5
-  fadeDistance: 2
-  autoFindCamera: 1
-  buildingRenderers: []
+  m_Size: {x: 4.0143805, y: 5.547109, z: 4.1903934}
+  m_Center: {x: 0, y: 2.7735546, z: -0.08927965}
 --- !u!114 &7153874358613813673
 MonoBehaviour:
   m_ObjectHideFlags: 0

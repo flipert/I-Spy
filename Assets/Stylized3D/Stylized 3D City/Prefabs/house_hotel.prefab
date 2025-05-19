@@ -12,7 +12,6 @@ GameObject:
   - component: {fileID: 33540600851403782}
   - component: {fileID: 23414891011922500}
   - component: {fileID: 4633288373974856591}
-  - component: {fileID: 5107947063861221557}
   - component: {fileID: 330658511350322086}
   m_Layer: 0
   m_Name: house_hotel
@@ -105,26 +104,8 @@ BoxCollider:
   m_ProvidesContacts: 0
   m_Enabled: 1
   serializedVersion: 3
-  m_Size: {x: 8.031344, y: 9.675998, z: 4.780979}
-  m_Center: {x: -0.00000047683716, y: 4.815327, z: -0.34127998}
---- !u!114 &5107947063861221557
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1848735731050220}
-  m_Enabled: 0
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: caf37f8c53c7d45be995ea75b4282398, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  transparentOpacity: 30
-  normalOpacity: 100
-  transitionSpeed: 5
-  fadeDistance: 2
-  autoFindCamera: 1
-  buildingRenderers: []
+  m_Size: {x: 8.031344, y: 9.675998, z: 4.1998997}
+  m_Center: {x: -0.00000047683716, y: 4.815327, z: -0.050740123}
 --- !u!114 &330658511350322086
 MonoBehaviour:
   m_ObjectHideFlags: 0

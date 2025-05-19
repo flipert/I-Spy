@@ -12,7 +12,6 @@ GameObject:
   - component: {fileID: 33127274663620954}
   - component: {fileID: 23122214862163336}
   - component: {fileID: 6459076211016210803}
-  - component: {fileID: 7223358553281013822}
   - component: {fileID: 3970802669875603966}
   m_Layer: 0
   m_Name: house_gelateria
@@ -105,26 +104,8 @@ BoxCollider:
   m_ProvidesContacts: 0
   m_Enabled: 1
   serializedVersion: 3
-  m_Size: {x: 4.184284, y: 8.960592, z: 4.790967}
-  m_Center: {x: -0.098870754, y: 4.480296, z: 0.40221262}
---- !u!114 &7223358553281013822
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1951416149581982}
-  m_Enabled: 0
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: caf37f8c53c7d45be995ea75b4282398, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  transparentOpacity: 30
-  normalOpacity: 100
-  transitionSpeed: 5
-  fadeDistance: 2
-  autoFindCamera: 1
-  buildingRenderers: []
+  m_Size: {x: 4.184284, y: 8.960592, z: 4.044791}
+  m_Center: {x: -0.098870754, y: 4.480296, z: 0.029124737}
 --- !u!114 &3970802669875603966
 MonoBehaviour:
   m_ObjectHideFlags: 0

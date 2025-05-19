@@ -95,7 +95,6 @@ GameObject:
   - component: {fileID: 33288823275417156}
   - component: {fileID: 23835638209904444}
   - component: {fileID: 2540704037546425439}
-  - component: {fileID: 5501365767927802214}
   - component: {fileID: 8130386707681341360}
   m_Layer: 0
   m_Name: house_barbershop
@@ -190,26 +189,8 @@ BoxCollider:
   m_ProvidesContacts: 0
   m_Enabled: 1
   serializedVersion: 3
-  m_Size: {x: 4.0108643, y: 7.9287624, z: 4.8312607}
-  m_Center: {x: 0, y: 3.9643812, z: 0.36558318}
---- !u!114 &5501365767927802214
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1932438511778760}
-  m_Enabled: 0
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: caf37f8c53c7d45be995ea75b4282398, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  transparentOpacity: 30
-  normalOpacity: 100
-  transitionSpeed: 5
-  fadeDistance: 2
-  autoFindCamera: 1
-  buildingRenderers: []
+  m_Size: {x: 4.0108643, y: 7.9287624, z: 4.212378}
+  m_Center: {x: 0, y: 3.9643812, z: 0.05614209}
 --- !u!114 &8130386707681341360
 MonoBehaviour:
   m_ObjectHideFlags: 0

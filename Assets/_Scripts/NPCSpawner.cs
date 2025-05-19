@@ -2,6 +2,7 @@ using UnityEngine;
 using Unity.Netcode;
 using System.Collections;
 using System.Collections.Generic;
+using UnityEngine.AI; // Added for NavMesh
 
 public class NPCSpawner : MonoBehaviour
 {
@@ -10,10 +11,8 @@ public class NPCSpawner : MonoBehaviour
 public GameObject[] npcPrefabs;
 [Tooltip("Maximum number of NPCs to spawn at game start.")]
 public int maxNPCCount = 10;
-[Tooltip("Area in which to spawn NPCs. The NPCs will be spawned randomly within this area.")]
-public Vector3 spawnAreaCenter = Vector3.zero;
-[Tooltip("Size (width, height, depth) of the spawn area.")]
-public Vector3 spawnAreaSize = new Vector3(20f, 0, 20f);
+[Tooltip("The maximum distance to search for a valid NavMesh point when spawning NPCs. Adjust this based on your NavMesh density and map size.")]
+public float navMeshSampleDistance = 1000f; // Increased default for larger maps
 
 // List to track spawned NPCs
 private List<NetworkObject> spawnedNPCs = new List<NetworkObject>();
@@ -50,11 +49,13 @@ yield break;
 // Spawn NPCs
 for (int i = 0; i < maxNPCCount; i++)
 {
-Vector3 randomPos = spawnAreaCenter + new Vector3(
-Random.Range(-spawnAreaSize.x / 2f, spawnAreaSize.x / 2f),
-0,
-Random.Range(-spawnAreaSize.z / 2f, spawnAreaSize.z / 2f)
-);
+Vector3 randomPos = GetRandomNavMeshPoint();
+if (randomPos == Vector3.zero) // Check if a valid point was found
+{
+Debug.LogWarning($"NPCSpawner: Could not find a valid NavMesh point for NPC {i+1}. Skipping this NPC.");
+continue;
+}
+
 Debug.Log($"NPCSpawner: Spawning NPC {i+1} at {randomPos}.");
 // Select a random NPC prefab from the array
 GameObject selectedPrefab = GetRandomNPCPrefab();
@@ -74,6 +75,7 @@ NetworkObject netObj = npcInstance.GetComponent<NetworkObject>();
 if (netObj == null)
 {
 Debug.LogError("NPCSpawner: The instantiated NPC does not have a NetworkObject component!");
+Destroy(npcInstance); // Clean up the instantiated object if it's not valid
 continue;
 }
 
@@ -83,6 +85,26 @@ spawnedNPCs.Add(netObj); // Track this spawned NPC
 Debug.Log("NPCSpawner: Successfully spawned NPC " + (i+1));
 }
 Debug.Log("NPCSpawner: Finished spawning NPCs.");
+}
+
+private Vector3 GetRandomNavMeshPoint()
+{
+// Define a very large area to sample from, effectively covering the whole map.
+// You might want to adjust the center and extents if your map has a specific origin or bounds.
+// For simplicity, we'll sample around the spawner's position with a large radius.
+Vector3 randomDirection = Random.insideUnitSphere * navMeshSampleDistance;
+randomDirection += transform.position; // Center the search around the spawner object
+
+NavMeshHit navHit;
+if (NavMesh.SamplePosition(randomDirection, out navHit, navMeshSampleDistance, NavMesh.AllAreas))
+{
+return navHit.position;
+}
+else
+{
+Debug.LogWarning("NPCSpawner: Failed to find a random point on the NavMesh. Returning Vector3.zero.");
+return Vector3.zero; // Return zero vector if no point is found
+}
 }
 
 // Handle late-joining clients

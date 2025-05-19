@@ -12,7 +12,6 @@ GameObject:
   - component: {fileID: 33861159587298498}
   - component: {fileID: 23821757760747566}
   - component: {fileID: 8139132466731391571}
-  - component: {fileID: 173453199671427736}
   - component: {fileID: 7430008053098314459}
   m_Layer: 0
   m_Name: house_coffeeshop
@@ -105,26 +104,8 @@ BoxCollider:
   m_ProvidesContacts: 0
   m_Enabled: 1
   serializedVersion: 3
-  m_Size: {x: 3.9865417, y: 5.6182685, z: 4.7684994}
-  m_Center: {x: 0, y: 2.8091342, z: -0.3558272}
---- !u!114 &173453199671427736
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1448358687671466}
-  m_Enabled: 0
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: caf37f8c53c7d45be995ea75b4282398, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  transparentOpacity: 30
-  normalOpacity: 100
-  transitionSpeed: 5
-  fadeDistance: 2
-  autoFindCamera: 1
-  buildingRenderers: []
+  m_Size: {x: 3.9865417, y: 5.6182685, z: 4.106801}
+  m_Center: {x: 0, y: 2.8091342, z: -0.02497816}
 --- !u!114 &7430008053098314459
 MonoBehaviour:
   m_ObjectHideFlags: 0
