@@ -69,6 +69,7 @@ public class NPCController : NetworkBehaviour
     // Add this enum and variable at the top of the class, below existing private variables
     enum NPCBehavior { Walker, WalksAndGroups }
     private NPCBehavior behavior;
+    private Rigidbody rb; // Add Rigidbody reference
 
     public override void OnNetworkSpawn()
     {
@@ -101,6 +102,13 @@ public class NPCController : NetworkBehaviour
             }
         }
         
+        // Get the Rigidbody component
+        rb = GetComponent<Rigidbody>();
+        if (rb == null)
+        {
+            Debug.LogError($"NPCController on {gameObject.name} is missing a Rigidbody component! Movement will not work correctly.", this);
+        }
+        
         // Subscribe to network variable change events
         networkTintColor.OnValueChanged += OnTintColorChanged;
         networkPosition.OnValueChanged += OnPositionChanged;
@@ -111,7 +119,14 @@ public class NPCController : NetworkBehaviour
         if (!IsServer)
         {
             // Apply the current network position
-            transform.position = networkPosition.Value;
+            if (rb != null) // Interpolate if Rigidbody is present
+            {
+                rb.MovePosition(networkPosition.Value);
+            }
+            else // Fallback if no Rigidbody (should not happen)
+            {
+                transform.position = networkPosition.Value;
+            }
             
             // Apply the current tint color
             if (npcRenderer != null)
@@ -205,7 +220,18 @@ public class NPCController : NetworkBehaviour
     
     private void OnPositionChanged(Vector3 previousValue, Vector3 newValue)
     {
-        if (!IsServer)
+        if (!IsServer && rb != null) // Only clients move, and only if rb exists
+        {
+            // Instead of directly setting transform.position,
+            // we let the Update loop handle interpolation via rb.MovePosition
+            // towards the latest networkPosition.Value.
+            // So, this callback might not need to do anything for position if
+            // non-local NPC movement is handled in Update/LateUpdate via Lerp.
+            // However, for immediate snapping on change (less smooth):
+            // rb.MovePosition(newValue);
+            // For now, let's assume Update handles smooth movement for non-owners.
+        }
+        else if (!IsServer) // Fallback if no Rigidbody (should not happen)
         {
             transform.position = newValue;
         }
@@ -358,7 +384,7 @@ public class NPCController : NetworkBehaviour
                     Vector3 proposedPos = transform.position + direction * walkSpeed * Time.deltaTime;
                     // If the proposed position is NOT in a forbidden area, move there; otherwise, choose a new destination
                     if(!IsPointInForbiddenArea(proposedPos)) {
-                        transform.position = proposedPos;
+                        if (rb != null) rb.MovePosition(proposedPos); else transform.position = proposedPos;
                         networkPosition.Value = proposedPos;
                         
                         // Make the sprite face the camera - this will handle both billboard effect and proper sprite orientation
@@ -469,6 +495,15 @@ public class NPCController : NetworkBehaviour
         {
             HandleGroupMovement();
         }
+        // For non-server entities, smoothly move towards the networkPosition
+        else if (!IsServer && rb != null)
+        {
+            rb.MovePosition(Vector3.Lerp(rb.position, networkPosition.Value, Time.deltaTime * 10f)); // Similar to PlayerController
+        }
+        else if (!IsServer) // Fallback if no Rigidbody
+        {
+            transform.position = Vector3.Lerp(transform.position, networkPosition.Value, Time.deltaTime * 10f);
+        }
         
         // Always make sprites face the camera
         if (IsServer)
@@ -494,15 +529,15 @@ public class NPCController : NetworkBehaviour
     private void HandleGroupMovement()
     {
         float step = walkSpeed * Time.deltaTime;
-        Vector3 proposedGroupPos = Vector3.MoveTowards(transform.position, formationTargetPos, step);
-        float distanceToTarget = Vector3.Distance(transform.position, formationTargetPos);
+        Vector3 proposedGroupPos = Vector3.MoveTowards(rb != null ? rb.position : transform.position, formationTargetPos, step);
+        float distanceToTarget = Vector3.Distance(rb != null ? rb.position : transform.position, formationTargetPos);
         
         if(distanceToTarget > destinationTolerance) {
             // Still moving toward formation position
             networkIsMoving.Value = true;
             
             if(!IsPointInForbiddenArea(proposedGroupPos)) {
-                transform.position = proposedGroupPos;
+                if (rb != null) rb.MovePosition(proposedGroupPos); else transform.position = proposedGroupPos;
                 networkPosition.Value = proposedGroupPos;
             }
             
@@ -514,7 +549,7 @@ public class NPCController : NetworkBehaviour
         } 
         else {
             // Reached formation position
-            transform.position = formationTargetPos;
+            if (rb != null) rb.MovePosition(formationTargetPos); else transform.position = formationTargetPos;
             networkPosition.Value = formationTargetPos;
             networkIsMoving.Value = false;
             

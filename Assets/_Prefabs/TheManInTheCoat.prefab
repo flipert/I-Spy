@@ -97,6 +97,7 @@ GameObject:
   - component: {fileID: 923334018254615283}
   - component: {fileID: 2735814200006622442}
   - component: {fileID: 2109716159598790390}
+  - component: {fileID: 1639591996172993363}
   m_Layer: 0
   m_Name: TheManInTheCoat
   m_TagString: Player
@@ -188,7 +189,7 @@ CapsuleCollider:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 5964388756769884995}
-  m_Material: {fileID: 0}
+  m_Material: {fileID: 13400000, guid: b974eed374b3b453f842e24644cfdc54, type: 2}
   m_IncludeLayers:
     serializedVersion: 2
     m_Bits: 0
@@ -204,6 +205,33 @@ CapsuleCollider:
   m_Height: 1
   m_Direction: 1
   m_Center: {x: 0, y: 0, z: 0}
+--- !u!54 &1639591996172993363
+Rigidbody:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5964388756769884995}
+  serializedVersion: 4
+  m_Mass: 1
+  m_Drag: 0
+  m_AngularDrag: 0.05
+  m_CenterOfMass: {x: 0, y: 0, z: 0}
+  m_InertiaTensor: {x: 1, y: 1, z: 1}
+  m_InertiaRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ImplicitCom: 1
+  m_ImplicitTensor: 1
+  m_UseGravity: 0
+  m_IsKinematic: 0
+  m_Interpolate: 0
+  m_Constraints: 116
+  m_CollisionDetection: 0
 --- !u!1 &8024665826702159164
 GameObject:
   m_ObjectHideFlags: 0
@@ -301,5 +329,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f5ae6a931ed2b4e69adff4898ef4492f, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  outlineColor: {r: 0, g: 1, b: 0, a: 1}
-  outlineSize: 0.3
+  outlineColor: {r: 1, g: 0.6523076, b: 0, a: 1}
+  outlineThicknessPixels: 2
+  fadeDuration: 0.25

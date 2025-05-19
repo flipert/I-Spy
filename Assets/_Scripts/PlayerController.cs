@@ -40,6 +40,7 @@ public class PlayerController : NetworkBehaviour
     private bool isMoving = false;
     private bool isFacingLeft = false;
     private bool isRunning = false;
+    private Rigidbody rb; // Add Rigidbody reference
 
     // This could be used to identify which character type this player is
     public int characterIndex { get; private set; } = 0;
@@ -55,6 +56,7 @@ public class PlayerController : NetworkBehaviour
 
         // Get the Animator on the same GameObject
         animator = GetComponent<Animator>();
+        rb = GetComponent<Rigidbody>(); // Get the Rigidbody component
 
         // Get the child named "Character" for flipping sprite
         Transform characterTransform = transform.Find("Character");
@@ -146,7 +148,8 @@ public class PlayerController : NetworkBehaviour
                         lastCameraRotationY = currentCameraRotationY;
                         
                         // Apply movement
-                        transform.position += currentMovement * currentSpeed * Time.deltaTime;
+                        // transform.position += currentMovement * currentSpeed * Time.deltaTime;
+                        rb.MovePosition(rb.position + currentMovement * currentSpeed * Time.deltaTime);
                         
                         // Skip the rest of the movement code
                         goto SkipMovement;
@@ -176,7 +179,8 @@ public class PlayerController : NetworkBehaviour
             }
             
             // Apply movement
-            transform.position += movement * currentSpeed * Time.deltaTime;
+            // transform.position += movement * currentSpeed * Time.deltaTime;
+            rb.MovePosition(rb.position + movement * currentSpeed * Time.deltaTime);
             
         SkipMovement:
 
@@ -238,13 +242,26 @@ public class PlayerController : NetworkBehaviour
                 UpdatePositionServerRpc(transform.position, isMoving, isFacingLeft);
             }
 
+            // If no input, explicitly stop the rigidbody's velocity to prevent sliding
+            if (!isMoving && rb != null)
+            {
+                rb.velocity = Vector3.zero;
+                rb.angularVelocity = Vector3.zero; // Also stop any rotation
+            }
+
             // Finally, update the stamina bar fill
             UpdateStaminaBar();
         }
         else
         {
             // For non-local players, update position and animation based on network variables
-            transform.position = Vector3.Lerp(transform.position, networkPosition.Value, Time.deltaTime * 10f);
+            // transform.position = Vector3.Lerp(transform.position, networkPosition.Value, Time.deltaTime * 10f);
+            if (rb != null) // Ensure Rigidbody exists before trying to move it
+            {
+                rb.MovePosition(Vector3.Lerp(rb.position, networkPosition.Value, Time.deltaTime * 10f));
+            } else { // Fallback for safety, though rb should exist
+                 transform.position = Vector3.Lerp(transform.position, networkPosition.Value, Time.deltaTime * 10f);
+            }
             
             // Update animator
             if (animator != null)
@@ -272,7 +289,7 @@ public class PlayerController : NetworkBehaviour
     [ServerRpc]
     private void UpdatePositionServerRpc(Vector3 position, bool isRunning, bool isFacingLeft)
     {
-        networkPosition.Value = position;
+        networkPosition.Value = position; // Server still receives and sets the target position
         networkIsRunning.Value = isRunning;
         networkIsFacingLeft.Value = isFacingLeft;
     }
