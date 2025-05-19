@@ -220,6 +220,17 @@ MonoBehaviour:
   - {r: 0.79766256, g: 0.11764705, b: 1, a: 1}
   - {r: 0, g: 0, b: 0, a: 1}
   npcAnimator: {fileID: 5384561374944021589}
+  stuckTimeThreshold: 0.3
+  stuckDistanceThreshold: 0.5
+  stuckCheckRadius: 0.6
+  obstacleDetectionLayerMask:
+    serializedVersion: 2
+    m_Bits: 392
+  collisionUnstuckLayers:
+    serializedVersion: 2
+    m_Bits: 392
+  unstuckMoveDistance: 1
+  unstuckMoveSpeed: 1.5
 --- !u!54 &7724191971257231475
 Rigidbody:
   m_ObjectHideFlags: 0

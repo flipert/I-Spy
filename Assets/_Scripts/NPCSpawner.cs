@@ -14,6 +14,12 @@ public int maxNPCCount = 10;
 [Tooltip("The maximum distance to search for a valid NavMesh point when spawning NPCs. Adjust this based on your NavMesh density and map size.")]
 public float navMeshSampleDistance = 1000f; // Increased default for larger maps
 
+[Header("Obstacle Avoidance Settings")]
+[Tooltip("Minimum distance an NPC should spawn away from any colliders on the obstacle layer.")]
+public float minSpawnDistanceFromObstacles = 1.0f;
+[Tooltip("Layers that contain obstacles the NPC should spawn away from (e.g., Buildings, Props).")]
+public LayerMask obstacleLayerMask;
+
 // List to track spawned NPCs
 private List<NetworkObject> spawnedNPCs = new List<NetworkObject>();
 
@@ -89,22 +95,35 @@ Debug.Log("NPCSpawner: Finished spawning NPCs.");
 
 private Vector3 GetRandomNavMeshPoint()
 {
-// Define a very large area to sample from, effectively covering the whole map.
-// You might want to adjust the center and extents if your map has a specific origin or bounds.
-// For simplicity, we'll sample around the spawner's position with a large radius.
-Vector3 randomDirection = Random.insideUnitSphere * navMeshSampleDistance;
-randomDirection += transform.position; // Center the search around the spawner object
+    const int maxAttempts = 20; // Increased attempts to find a clear spot
+    for (int attempt = 0; attempt < maxAttempts; attempt++)
+    {
+        Vector3 randomDirection = Random.insideUnitSphere * navMeshSampleDistance;
+        randomDirection += transform.position;
 
-NavMeshHit navHit;
-if (NavMesh.SamplePosition(randomDirection, out navHit, navMeshSampleDistance, NavMesh.AllAreas))
-{
-return navHit.position;
-}
-else
-{
-Debug.LogWarning("NPCSpawner: Failed to find a random point on the NavMesh. Returning Vector3.zero.");
-return Vector3.zero; // Return zero vector if no point is found
-}
+        NavMeshHit navHit;
+        if (NavMesh.SamplePosition(randomDirection, out navHit, navMeshSampleDistance, NavMesh.AllAreas))
+        {
+            // Check if the found point is too close to any obstacles
+            // Ensure obstacleLayerMask is assigned in the inspector, otherwise this check might not work as intended.
+            if (obstacleLayerMask.value == 0) // LayerMask not set, behave as before or warn
+            {
+                 Debug.LogWarning("NPCSpawner: Obstacle Layer Mask is not set in the Inspector. Spawning without obstacle avoidance check.");
+                 return navHit.position; // Or continue to check with a default mask if preferred
+            }
+            
+            if (!Physics.CheckSphere(navHit.position, minSpawnDistanceFromObstacles, obstacleLayerMask))
+            {
+                // No obstacles on the specified layers are nearby, this is a valid spawn point
+                return navHit.position;
+            }
+            // else, point is too close to an obstacle on the specified layers, try again
+        }
+        // else, NavMesh.SamplePosition failed to find a point on the NavMesh, try again
+    }
+
+    Debug.LogWarning($"NPCSpawner: Failed to find a random point on the NavMesh clear of obstacles on specified layers after {maxAttempts} attempts. Returning Vector3.zero. Check NavMesh baking and obstacleLayerMask settings.");
+    return Vector3.zero; // Return zero vector if no suitable point is found
 }
 
 // Handle late-joining clients

@@ -71,6 +71,30 @@ public class NPCController : NetworkBehaviour
     private NPCBehavior behavior;
     private Rigidbody rb; // Add Rigidbody reference
 
+    // Stuck Detection Variables
+    [Header("Stuck Detection (Server-Side)")]
+    [Tooltip("Time (seconds) an NPC must be 'slow' while walking before checking if stuck.")]
+    public float stuckTimeThreshold = 2.0f;
+    [Tooltip("Max distance moved during stuckTimeThreshold to be considered stuck.")]
+    public float stuckDistanceThreshold = 0.5f;
+    [Tooltip("Radius to check for colliders when NPC is suspected of being stuck.")]
+    public float stuckCheckRadius = 0.6f;
+    [Tooltip("Layers to check for obstacles when NPC is suspected of being stuck.")]
+    public LayerMask obstacleDetectionLayerMask;
+
+    [Header("Unstucking Settings (Server-Side)")]
+    [Tooltip("Layers that will trigger the unsticking behavior upon collision (e.g., Buildings, Props).")]
+    public LayerMask collisionUnstuckLayers;
+    [Tooltip("How far the NPC will attempt to move away from an obstacle when unsticking.")]
+    public float unstuckMoveDistance = 1.0f;
+    [Tooltip("Speed of the NPC when performing the unsticking movement.")]
+    public float unstuckMoveSpeed = 1.5f;
+
+    private Vector3 lastPositionCheck;
+    private float stuckTimer;
+    private bool serverIsUnsticking = false;
+    private Coroutine activeUnstuckingCoroutine = null;
+
     public override void OnNetworkSpawn()
     {
         base.OnNetworkSpawn();
@@ -211,6 +235,11 @@ public class NPCController : NetworkBehaviour
             networkPosition.Value = currentDestination;
             Debug.Log("NPCController: Spawn position was inside a forbidden area. Repositioning NPC.");
         }
+
+        // Initialize stuck detection variables
+        lastPositionCheck = transform.position;
+        stuckTimer = 0f;
+        serverIsUnsticking = false; // Ensure initialized
     }
     
     private void OnTintColorChanged(Color previousValue, Color newValue)
@@ -316,23 +345,48 @@ public class NPCController : NetworkBehaviour
     // Pick a random destination within the allowed area that is not inside a forbidden area
     private void PickNewDestination()
     {
-        // Try a few attempts to find a valid destination
-        for (int attempts = 0; attempts < 10; attempts++)
+        const int maxPickAttempts = 10; // Max attempts to find a clear destination
+        for (int attempt = 0; attempt < maxPickAttempts; attempt++)
         {
             Vector3 randomPoint = allowedAreaCenter + new Vector3(
                 Random.Range(-allowedAreaSize.x / 2f, allowedAreaSize.x / 2f),
-                0,
+                0, // Assuming NPCs move on a flat plane relative to allowedAreaCenter. Adjust if Y varies.
                 Random.Range(-allowedAreaSize.z / 2f, allowedAreaSize.z / 2f)
             );
-            if (!IsPointInForbiddenArea(randomPoint))
+
+            // 1. Check if the point itself is in a forbidden area (existing check)
+            if (IsPointInForbiddenArea(randomPoint))
             {
-                currentDestination = randomPoint;
-                networkDestination.Value = randomPoint;
-                return;
+                continue; // Try another point
             }
+
+            // 2. Proactive Path Check: Raycast to see if the path to this point is clear of critical obstacles
+            Vector3 currentPosition = rb != null ? rb.position : transform.position;
+            Vector3 directionToRandomPoint = (randomPoint - currentPosition).normalized;
+            float distanceToRandomPoint = Vector3.Distance(currentPosition, randomPoint);
+
+            // Ensure we don't raycast with zero distance if NPC is already at the randomPoint (unlikely here but good practice)
+            if (distanceToRandomPoint > 0.01f)
+            {
+                // Use the collisionUnstuckLayers for this check as well, or a dedicated one if needed.
+                if (Physics.Raycast(currentPosition, directionToRandomPoint, out RaycastHit hitInfo, distanceToRandomPoint, collisionUnstuckLayers))
+                {
+                    Debug.Log($"[NPC_PATH_BLOCKED] NPC '{gameObject.name}': Proposed path to {randomPoint} is blocked by '{hitInfo.collider.name}' on a critical layer. Attempting to find new destination (Attempt: {attempt + 1}/{maxPickAttempts}).");
+                    continue; // Path is blocked, try to pick another destination
+                }
+            }
+            
+            // If both checks pass, this is a good destination
+            currentDestination = randomPoint;
+            networkDestination.Value = randomPoint;
+            Debug.Log($"[NPC_DESTINATION] NPC '{gameObject.name}' picked new destination: {currentDestination}");
+            return;
         }
-        // Fallback to current position if no valid point is found
-        currentDestination = transform.position;
+
+        // Fallback: Could not find a suitable clear destination after several attempts.
+        // Stay at current position or pick the last tried random point even if potentially blocked (less ideal).
+        Debug.LogWarning($"[NPC_DESTINATION_FAIL] NPC '{gameObject.name}': Failed to find a clear new destination after {maxPickAttempts} attempts. Staying at current position or last tried point.");
+        currentDestination = transform.position; // Default to current position
         networkDestination.Value = transform.position;
     }
 
@@ -359,6 +413,12 @@ public class NPCController : NetworkBehaviour
         while (true)
         {
             if (!IsServer) yield break;
+
+            if (serverIsUnsticking) {
+                networkIsMoving.Value = true; // Keep animation if desired
+                yield return null; // Let the UnstuckRoutine do its job
+                continue;
+            }
 
             if (!inGroup)
             {
@@ -409,6 +469,12 @@ public class NPCController : NetworkBehaviour
         while (true)
         {
             if (!IsServer) yield break;
+
+            if (serverIsUnsticking) {
+                networkIsMoving.Value = true; // Keep animation if desired
+                yield return null; // Let the UnstuckRoutine do its job
+                continue;
+            }
 
             // Only process grouping if behavior is WalksAndGroups
             if(behavior != NPCBehavior.WalksAndGroups) {
@@ -486,20 +552,73 @@ public class NPCController : NetworkBehaviour
                     inGroup = false;
                     PickNewDestination();
                 }
-                yield return null;
             }
         }
     }
 
     private void Update()
     {
-        // Handle group movement if in a group
-        if (IsServer && inGroup)
+        if (IsServer)
         {
-            HandleGroupMovement();
+            // Handle group movement if in a group
+            if (inGroup)
+            {
+                HandleGroupMovement();
+            }
+
+            // Stuck detection logic
+            if (networkIsMoving.Value)
+            {
+                stuckTimer += Time.deltaTime;
+                if (stuckTimer >= stuckTimeThreshold)
+                {
+                    float distanceMoved = Vector3.Distance(transform.position, lastPositionCheck);
+                    if (distanceMoved < stuckDistanceThreshold)
+                    {
+                        // NPC might be stuck, check for colliders
+                        // Only run stuck alert if not currently trying to unstuck from a collision
+                        if (!serverIsUnsticking) 
+                        {
+                            Collider[] hitColliders = Physics.OverlapSphere(transform.position, stuckCheckRadius, obstacleDetectionLayerMask);
+                            if (hitColliders.Length > 0)
+                            {
+                                string colliderNames = "";
+                                foreach (var hitCollider in hitColliders)
+                                {
+                                    // Skip self
+                                    if (hitCollider.gameObject == gameObject) continue;
+                                    colliderNames += hitCollider.gameObject.name + (hitCollider.transform.parent ? " (Parent: " + hitCollider.transform.parent.name + ")" : "") + ", ";
+                                }
+                                if (!string.IsNullOrEmpty(colliderNames))
+                                {
+                                    Debug.LogWarning($"[NPC_STUCK_ALERT] NPC '{gameObject.name}' (ID: {NetworkObjectId}) might be stuck near {transform.position}. Detected obstacles: {colliderNames.TrimEnd(',', ' ')}");
+                                }
+                                else
+                                {
+                                    // This case might happen if the only colliders detected were the NPC itself, which we skip.
+                                    Debug.LogWarning($"[NPC_STUCK_ALERT] NPC '{gameObject.name}' (ID: {NetworkObjectId}) might be stuck near {transform.position}. No external obstacles detected on specified layers. Current Destination: {currentDestination}. Consider checking NavMesh or other movement logic.");
+                                }
+                            }
+                            else
+                            {
+                                Debug.LogWarning($"[NPC_STUCK_ALERT] NPC '{gameObject.name}' (ID: {NetworkObjectId}) might be stuck near {transform.position}. No obstacles detected on specified layers. Current Destination: {currentDestination}. Consider checking NavMesh.");
+                            }
+                        }
+                        lastPositionCheck = transform.position;
+                        stuckTimer = 0f;
+                    }
+                }
+            }
+            else
+            {
+                // Reset when not moving
+                lastPositionCheck = transform.position;
+                stuckTimer = 0f;
+            }
         }
+
         // For non-server entities, smoothly move towards the networkPosition
-        else if (!IsServer && rb != null)
+        if (!IsServer && rb != null) // Note: Changed 'else if' to 'if' to allow server to also execute billboard logic below
         {
             rb.MovePosition(Vector3.Lerp(rb.position, networkPosition.Value, Time.deltaTime * 10f)); // Similar to PlayerController
         }
@@ -671,5 +790,81 @@ public class NPCController : NetworkBehaviour
     private IEnumerator EnableGroupingAfterDelay(float delaySeconds) {
         yield return new WaitForSeconds(delaySeconds);
         groupingEnabled = true;
+    }
+
+    // Called when a collision occurs and persists
+    private void OnCollisionStay(Collision collision)
+    {
+        if (!IsServer || serverIsUnsticking || !networkIsMoving.Value) return;
+
+        // Check if the collision is with a layer that should trigger unstucking
+        if ((collisionUnstuckLayers.value & (1 << collision.gameObject.layer)) > 0)
+        {
+            // Check contacts for a valid normal
+            if (collision.contactCount > 0)
+            {
+                ContactPoint contact = collision.contacts[0];
+                Vector3 awayDirection = contact.normal; // Normal points away from the obstacle
+
+                // Ensure awayDirection is somewhat horizontal if preferred, to avoid launching upwards on flat ground collisions
+                // For now, we use the direct normal.
+
+                Debug.Log($"[NPC_UNSTICKING] NPC '{gameObject.name}' collided with '{collision.gameObject.name}' on a critical layer. Attempting to unstuck.");
+
+                serverIsUnsticking = true;
+                // networkIsMoving.Value = false; // Stop regular movement processing by other routines briefly
+
+                if (activeUnstuckingCoroutine != null)
+                {
+                    StopCoroutine(activeUnstuckingCoroutine);
+                }
+                activeUnstuckingCoroutine = StartCoroutine(UnstuckRoutine(awayDirection));
+            }
+        }
+    }
+
+    private IEnumerator UnstuckRoutine(Vector3 awayDirection)
+    {
+        networkIsMoving.Value = true; // Ensure NPC is animated as moving
+
+        Vector3 startPosition = transform.position;
+        // Calculate target position slightly further than unstuckMoveDistance to ensure clearance
+        Vector3 targetUnstuckPosition = startPosition + awayDirection * (unstuckMoveDistance + 0.1f);
+        float journeyDuration = unstuckMoveDistance / unstuckMoveSpeed; 
+        float elapsedTime = 0f;
+
+        Debug.Log($"[NPC_UNSTICKING] Starting UnstuckRoutine for '{gameObject.name}'. Moving from {startPosition} towards {targetUnstuckPosition} over {journeyDuration}s.");
+
+        while (elapsedTime < journeyDuration)
+        {
+            Vector3 currentLerpPos = Vector3.Lerp(startPosition, targetUnstuckPosition, elapsedTime / journeyDuration);
+            if (rb != null)
+            {
+                rb.MovePosition(currentLerpPos);
+            }
+            else
+            {
+                transform.position = currentLerpPos;
+            }
+            networkPosition.Value = rb != null ? rb.position : transform.position;
+            elapsedTime += Time.deltaTime;
+            yield return null;
+        }
+
+        // Ensure final position is set
+        Vector3 finalPos = rb != null ? rb.position : transform.position; // Use actual final position after MovePosition attempts
+        if (Vector3.Distance(finalPos, targetUnstuckPosition) > 0.05f) { // If not quite there, snap
+             if (rb != null) rb.MovePosition(targetUnstuckPosition); else transform.position = targetUnstuckPosition;
+             networkPosition.Value = targetUnstuckPosition;
+        }
+
+        Debug.Log($"[NPC_UNSTICKING] '{gameObject.name}' finished unstuck movement. Picking new destination.");
+        PickNewDestination(); 
+        
+        // Reset flags after picking new destination and allowing one frame for MovementRoutine to potentially start
+        yield return null; 
+        serverIsUnsticking = false;
+        activeUnstuckingCoroutine = null;
+        // networkIsMoving.Value will be controlled by MovementRoutine now
     }
 } 

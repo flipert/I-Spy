@@ -218,22 +218,20 @@ public class PlayerSpawner : MonoBehaviour
             }
             else
             {
-                // Create a simple cube as an absolute last resort
-                Debug.LogWarning("PlayerSpawner: No fallback player prefab assigned. Creating a basic placeholder.");
-                GameObject cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                cube.name = "EmergencyPlayerPrefab";
-                
-                // Make sure it has a NetworkObject component
-                if (cube.GetComponent<NetworkObject>() == null)
-                {
-                    cube.AddComponent<NetworkObject>();
-                }
-                
-                characterPrefab = cube;
-                return;
+                // If fallbackPlayerPrefab is also null, and no characterPrefab was found,
+                // log an error. No emergency prefab will be created.
+                Debug.LogError("PlayerSpawner: Critical - No character prefab selected and no fallbackPlayerPrefab available. Player will not be spawned for client " + clientId);
+                // characterPrefab remains null, subsequent Instantiate will fail or be skipped if null.
             }
         }
         
+        // If after all checks, characterPrefab is still null, we cannot spawn.
+        if (characterPrefab == null)
+        {
+            Debug.LogError($"PlayerSpawner: Final check - characterPrefab is null for client {clientId}. Aborting spawn.");
+            return; // Explicitly stop if no valid prefab is found.
+        }
+
         Debug.Log($"PlayerSpawner: Spawning character '{characterPrefab.name}' for client {clientId} at {spawnPosition}");
         
         // Instantiate the player
