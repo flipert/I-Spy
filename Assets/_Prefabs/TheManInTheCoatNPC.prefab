@@ -203,6 +203,9 @@ MonoBehaviour:
   maxIdleTime: 5
   maxRunTime: 10
   wanderRadius: 100
+  moveSpeed: 2
+  angularSpeed: 120
+  acceleration: 100
   npcAnimator: {fileID: 3879874863887253514}
 --- !u!54 &5579437178170355664
 Rigidbody:

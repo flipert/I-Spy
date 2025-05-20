@@ -14,6 +14,14 @@ public class NPCController : NetworkBehaviour
     [Tooltip("Radius within which to pick a new random destination.")]
     public float wanderRadius = 20f;
 
+    [Header("Movement Settings")]
+    [Tooltip("The speed at which the NPC moves.")]
+    public float moveSpeed = 3.5f; // Default speed
+    [Tooltip("The angular speed for turning (degrees/second). Lower values mean smoother turns.")]
+    public float angularSpeed = 120f; // Default angular speed
+    [Tooltip("The acceleration of the NPC. High value for quick speed changes up to max speed.")]
+    public float acceleration = 100f; // High acceleration for responsive start/stop
+
     [Header("Animation")]
     [Tooltip("Animator component from the NPC prefab. Expecting a 'Running' boolean parameter.")]
     public Animator npcAnimator;
@@ -55,6 +63,12 @@ public class NPCController : NetworkBehaviour
         if (agent != null)
         {
             agent.updateRotation = false; // Prevent NavMeshAgent from rotating the parent GameObject
+            if (IsServer) // Server controls agent properties
+            {
+                agent.speed = moveSpeed;
+                agent.angularSpeed = angularSpeed;
+                agent.acceleration = acceleration;
+            }
         }
 
         if (npcAnimator == null) npcAnimator = GetComponentInChildren<Animator>();
@@ -85,6 +99,13 @@ public class NPCController : NetworkBehaviour
         else // Server initializes state
         {
             agent.Warp(transform.position); // Ensure agent is at the spawned position
+            // Apply speed settings on server-controlled agent
+            if (agent != null)
+            {
+                agent.speed = moveSpeed;
+                agent.angularSpeed = angularSpeed;
+                agent.acceleration = acceleration;
+            }
             DecideNextState();
         }
     }
@@ -104,9 +125,14 @@ public class NPCController : NetworkBehaviour
         // For clients, if we want them to *also* path for smoother visuals (optional advanced)
         // For now, clients mostly rely on networkPosition for movement lerping.
         // However, setting the agent's destination can be useful for visual debugging or if agent.remainingDistance is used by client.
-        if (agent != null && agent.isOnNavMesh && agent.destination != newValue)
+        if (agent != null && agent.isOnNavMesh) // Removed agent.destination != newValue check, let client also set/update
         {
             // agent.SetDestination(newValue); // Potentially enable if client-side pathing is desired for prediction
+            // Client agent should also respect speed settings if it's doing any pathing or for visual consistency
+            // However, primary control is server-side. This is more for visual consistency if client-side prediction pathing is used.
+            // agent.speed = moveSpeed;
+            // agent.angularSpeed = angularSpeed;
+            // agent.acceleration = acceleration;
         }
     }
 
@@ -125,9 +151,18 @@ public class NPCController : NetworkBehaviour
         {
             transform.position = networkPosition.Value; // Snap to initial position
         }
-        if (agent != null && agent.isOnNavMesh && networkAgentDestination.Value != Vector3.zero)
+
+        // Apply speed settings to client's agent if it exists, mainly for visual consistency or if client-side pathing is enabled.
+        // The actual movement authority and simulation is on the server.
+        if (agent != null && agent.isOnNavMesh)
         {
-           // agent.SetDestination(networkAgentDestination.Value); // Optional: client sets initial destination
+            // agent.speed = moveSpeed; // Not strictly necessary for pure position syncing.
+            // agent.angularSpeed = angularSpeed; // Ditto.
+            // agent.acceleration = acceleration; // Ditto.
+            if (networkAgentDestination.Value != Vector3.zero)
+            {
+                // agent.SetDestination(networkAgentDestination.Value); // Optional: client sets initial destination
+            }
         }
         if (npcAnimator != null) npcAnimator.SetBool("Running", networkIsMoving.Value);
     }
