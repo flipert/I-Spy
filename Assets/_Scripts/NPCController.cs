@@ -26,10 +26,15 @@ public class NPCController : NetworkBehaviour
     [Tooltip("If true, NavMeshAgent-level obstacle avoidance will be disabled, allowing NPCs to pass through each other.")]
     public bool disableAgentObstacleAvoidance = true;
 
+    [Header("Appearance")]
+    [Tooltip("Index for pre-defined pastel color (0-5). -1 for random pastel. Defaults to white if index is out of range unless -1.")]
+    public int assignedColorIndex = -1;
+    [Tooltip("SpriteRenderer for the character visuals. Assign the 'Character' child's SpriteRenderer here if possible.")]
+    public SpriteRenderer characterSpriteRenderer; // Made public
+
     [Header("Animation")]
     [Tooltip("Animator component from the NPC prefab. Expecting a 'Running' boolean parameter.")]
     public Animator npcAnimator;
-    private SpriteRenderer characterSpriteRenderer; // Specifically for the character sprite
     private Rigidbody rb; // Moved Rigidbody declaration here
 
     // Network Variables
@@ -41,11 +46,24 @@ public class NPCController : NetworkBehaviour
         NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
     private NetworkVariable<Vector3> networkAgentDesiredVelocity = new NetworkVariable<Vector3>(Vector3.zero, // For client-side flip logic
         NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
+    private NetworkVariable<Color> networkSpriteColor = new NetworkVariable<Color>(Color.white, // For sprite tinting
+        NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
         
     // Internal State
     private NavMeshAgent agent;
     private float currentStateTimer;
     private bool serverIsRunningState;
+
+    // Define pastel colors
+    private static readonly Color[] pastelColors = new Color[]
+    {
+        new Color(0.98f, 0.68f, 0.68f, 1f), // Pastel 0 (Salmon Pink)
+        new Color(0.68f, 0.98f, 0.68f, 1f), // Pastel 1 (Mint Green)
+        new Color(0.68f, 0.68f, 0.98f, 1f), // Pastel 2 (Lavender Blue)
+        new Color(0.98f, 0.98f, 0.68f, 1f), // Pastel 3 (Pale Yellow)
+        new Color(0.98f, 0.8f, 0.6f, 1f),   // Pastel 4 (Peach)
+        new Color(0.8f, 0.68f, 0.98f, 1f)   // Pastel 5 (Lilac)
+    };
 
     // Add Awake to set Rigidbody to kinematic if present
     void Awake()
@@ -87,10 +105,35 @@ public class NPCController : NetworkBehaviour
         if (npcAnimator == null) npcAnimator = GetComponentInChildren<Animator>();
         
         // Find the Character child and its SpriteRenderer
-        Transform characterTransform = transform.Find("Character");
-        if (characterTransform != null)
+        if (characterSpriteRenderer == null) // If not assigned in Inspector, try to find it
         {
-            characterSpriteRenderer = characterTransform.GetComponent<SpriteRenderer>();
+            // Attempt to find it based on the hierarchy: Root -> TheManInTheCoatNPC -> Character
+            // Assuming the intermediate child has the same name as the root prefab, which might be the case from screenshots
+            Transform intermediateChild = transform.Find(gameObject.name); // e.g., "TheManInTheCoatNPC"
+            if (intermediateChild == null && transform.childCount > 0) {
+                // Fallback if the intermediate child is not named the same as the root, but is the first child (common setup)
+                // Or if the animator is on this child.
+                if (npcAnimator != null && npcAnimator.transform != transform) {
+                     intermediateChild = npcAnimator.transform;
+                } else {
+                    // A general guess if there's an intermediate parent for visuals
+                    // This part is speculative without exact naming conventions.
+                    // For now, let's assume the animator's parent or a direct child if animator is on root.
+                }
+            }
+            
+            // If an intermediate child is found (could be the animator's gameobject)
+            Transform parentToSearchCharacterIn = transform; // Default to root
+            if (intermediateChild != null && intermediateChild != transform) {
+                 parentToSearchCharacterIn = intermediateChild;
+            }
+
+
+            Transform characterChildTransform = parentToSearchCharacterIn.Find("Character");
+            if (characterChildTransform != null)
+            {
+                characterSpriteRenderer = characterChildTransform.GetComponent<SpriteRenderer>();
+            }
         }
 
         if (agent == null)
@@ -105,8 +148,8 @@ public class NPCController : NetworkBehaviour
             networkPosition.OnValueChanged += ClientOnPositionChanged;
             networkIsMoving.OnValueChanged += ClientOnIsMovingChanged;
             networkAgentDestination.OnValueChanged += ClientOnAgentDestinationChanged;
-            // No specific OnValueChanged for networkSpriteFlipX, clients read it in Update
-            // No OnValueChanged needed for networkAgentDesiredVelocity, client reads in Update
+            networkAgentDesiredVelocity.OnValueChanged += ClientOnAgentDesiredVelocityChanged;
+            networkSpriteColor.OnValueChanged += ClientOnSpriteColorChanged;
 
             ApplyCurrentNetworkState();
         }
@@ -128,6 +171,22 @@ public class NPCController : NetworkBehaviour
                     agent.obstacleAvoidanceType = ObstacleAvoidanceType.HighQualityObstacleAvoidance;
                 }
             }
+            // Apply color on server side if needed for any direct server rendering/logic (usually not for sprites)
+            // Determine and set initial color
+            Color initialColor = Color.white;
+            if (assignedColorIndex == -1) // Random pastel
+            {
+                initialColor = pastelColors[Random.Range(0, pastelColors.Length)];
+            }
+            else if (assignedColorIndex >= 0 && assignedColorIndex < pastelColors.Length) // Assigned pastel
+            {
+                initialColor = pastelColors[assignedColorIndex];
+            }
+            // If index is out of range (and not -1), it remains Color.white as per network var default or can be set explicitly
+            
+            networkSpriteColor.Value = initialColor;
+            if(characterSpriteRenderer != null) characterSpriteRenderer.color = initialColor; // Also apply on server for host
+
             DecideNextState();
         }
     }
@@ -163,6 +222,19 @@ public class NPCController : NetworkBehaviour
         if (npcAnimator != null) npcAnimator.SetBool("Running", newValue);
     }
 
+    private void ClientOnAgentDesiredVelocityChanged(Vector3 previous, Vector3 current)
+    {
+        // Placeholder: Client logic for when desired velocity changes, if any beyond Update's use
+    }
+
+    private void ClientOnSpriteColorChanged(Color previousValue, Color newValue)
+    {
+        if (characterSpriteRenderer != null)
+        {
+            characterSpriteRenderer.color = newValue;
+        }
+    }
+
     private void ApplyCurrentNetworkState()
     {
         if (rb != null && networkPosition.Value != Vector3.zero) // Check if Rigidbody exists and pos is valid
@@ -187,6 +259,7 @@ public class NPCController : NetworkBehaviour
             }
         }
         if (npcAnimator != null) npcAnimator.SetBool("Running", networkIsMoving.Value);
+        if (characterSpriteRenderer != null) characterSpriteRenderer.color = networkSpriteColor.Value; // Apply initial color
     }
 
 
@@ -287,6 +360,8 @@ public class NPCController : NetworkBehaviour
         if (npcAnimator != null) npcAnimator.SetBool("Running", false);
         currentStateTimer = Random.Range(1f, maxIdleTime);
         networkAgentDesiredVelocity.Value = Vector3.zero; // NPC is idle, no desired velocity
+        networkAgentDestination.OnValueChanged -= ClientOnAgentDestinationChanged;
+        if(networkSpriteColor != null) networkSpriteColor.OnValueChanged -= ClientOnSpriteColorChanged;
     }
 
     private void TransitionToRunning()
@@ -369,6 +444,8 @@ public class NPCController : NetworkBehaviour
             networkPosition.OnValueChanged -= ClientOnPositionChanged;
             networkIsMoving.OnValueChanged -= ClientOnIsMovingChanged;
             networkAgentDestination.OnValueChanged -= ClientOnAgentDestinationChanged;
+            networkAgentDesiredVelocity.OnValueChanged -= ClientOnAgentDesiredVelocityChanged;
+            networkSpriteColor.OnValueChanged -= ClientOnSpriteColorChanged;
             // No networkSpriteFlipX OnValueChanged to remove as it wasn't added
             // No OnValueChanged for networkAgentDesiredVelocity
         }
