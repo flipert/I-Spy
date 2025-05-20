@@ -54,14 +54,6 @@ public class NPCController : NetworkBehaviour
     private float groupTimer = 0f;
     private Vector3 formationTargetPos;
 
-    [Header("Group Leaving Dynamics")]
-    [Tooltip("Base probability per second that an NPC will leave a group.")]
-    public float baseLeaveChancePerSecond = 0.02f; // e.g., 2% chance per second initially
-    [Tooltip("How much the leave probability increases each second the NPC remains in the group.")]
-    public float leaveChanceIncreaseRatePerSecond = 0.01f; // e.g., an additional 1% chance per second
-
-    private float timeInGroup = 0f; // Tracks how long NPC has been in current group
-
     [Header("Random Tint")]
     [Tooltip("Array of up to 6 tint colors that can be randomly assigned to the NPC")]
     public Color[] tintColors;
@@ -97,8 +89,6 @@ public class NPCController : NetworkBehaviour
     public float unstuckMoveDistance = 1.0f;
     [Tooltip("Speed of the NPC when performing the unsticking movement.")]
     public float unstuckMoveSpeed = 1.5f;
-    [Tooltip("Radius around the NPC to check for forbidden areas. Should be at least half the NPC's width.")]
-    public float npcClearanceRadius = 0.5f;
 
     private Vector3 lastPositionCheck;
     private float stuckTimer;
@@ -147,7 +137,6 @@ public class NPCController : NetworkBehaviour
         networkTintColor.OnValueChanged += OnTintColorChanged;
         networkPosition.OnValueChanged += OnPositionChanged;
         networkIsMoving.OnValueChanged += OnMovingChanged;
-        networkSpriteFlipX.OnValueChanged += OnSpriteFlipChanged;
         
         // If we are the client, apply initial values
         if (!IsServer)
@@ -173,13 +162,6 @@ public class NPCController : NetworkBehaviour
             {
                 npcAnimator.SetBool("Running", networkIsMoving.Value);
             }
-            
-            // Apply sprite flip
-            SpriteRenderer spriteR = npcRenderer as SpriteRenderer;
-            if (spriteR != null)
-            {
-                spriteR.flipX = networkSpriteFlipX.Value;
-            }
         }
         
         // Server-only initialization
@@ -200,58 +182,46 @@ public class NPCController : NetworkBehaviour
 
         if (tintColors != null && tintColors.Length > 0)
         {
-            // Pick a random color from the available list (up to 6 colors)
             int idx = Random.Range(0, Mathf.Min(tintColors.Length, 6));
             Color selectedColor = tintColors[idx];
             networkTintColor.Value = selectedColor;
             SetTintColor(selectedColor);
         }
 
-        // Randomly assign behavior: 50% Walker, 50% WalksAndGroups
         behavior = (Random.value < 0.5f) ? NPCBehavior.Walker : NPCBehavior.WalksAndGroups;
 
-        // If behavior is WalksAndGroups, perform grouping initialization
         if(behavior == NPCBehavior.WalksAndGroups) {
             if(Random.value < 0.4f) {
-                // 40% start in a group
                 inGroup = true;
                 networkInGroup.Value = true;
                 groupingEnabled = true;
                 groupTimer = Random.Range(minGroupTime, maxGroupTime);
                 ComputeFormationTarget();
             } else {
-                // The NPC will walk around and not try to group for at least 10 seconds
                 StartCoroutine(EnableGroupingAfterDelay(10f));
             }
         } else {
-            // For Walker behavior, ensure not in a group
             inGroup = false;
             networkInGroup.Value = false;
         }
 
-        // Set the NPC's scale to Vector3.one to match the player's size
-        transform.localScale = Vector3.one;
-
-        // Emergency Reposition: If spawned in a forbidden area, move to allowedAreaCenter first.
-        if(IsPointInForbiddenArea(transform.position, npcClearanceRadius)) {
-            Debug.LogWarning($"[NPC_INIT_REPOS] NPC '{gameObject.name}' (ID: {NetworkObjectId}) spawned in a forbidden area at {transform.position}. Forcing move to allowedAreaCenter: {allowedAreaCenter}.");
-            transform.position = allowedAreaCenter;
-            if (rb != null) rb.MovePosition(allowedAreaCenter);
-            networkPosition.Value = allowedAreaCenter; // Ensure network syncs this forced move
-            // Also update lastPositionCheck to prevent immediate false stuck detection
-            lastPositionCheck = allowedAreaCenter;
-        }
-
-        // Then start the routines
         PickNewDestination();
         StartCoroutine(MovementRoutine());
         if(behavior == NPCBehavior.WalksAndGroups) {
             StartCoroutine(GroupingRoutine());
         }
 
-        // Initialize stuck detection variables
+        transform.localScale = Vector3.one;
+
+        // Reverted spawn position check
+        if(IsPointInForbiddenArea(transform.position)) { 
+            Debug.LogWarning($"NPCController: NPC '{gameObject.name}' spawned in a forbidden area at {transform.position}. Picking new destination.");
+            PickNewDestination(); 
+        }
+
+        lastPositionCheck = transform.position;
         stuckTimer = 0f;
-        serverIsUnsticking = false; // Ensure initialized
+        serverIsUnsticking = false;
     }
     
     private void OnTintColorChanged(Color previousValue, Color newValue)
@@ -286,55 +256,6 @@ public class NPCController : NetworkBehaviour
         }
     }
     
-    private void OnSpriteFlipChanged(bool previousValue, bool newValue)
-    {
-        SpriteRenderer spriteR = npcRenderer as SpriteRenderer;
-        if (spriteR != null)
-        {
-            spriteR.flipX = newValue;
-            
-            // Make the sprite face the camera
-            MakeSpritesFaceCamera();
-        }
-    }
-    
-    // Make sprites face the camera (billboard effect) while maintaining correct movement direction
-    private void MakeSpritesFaceCamera()
-    {
-        SpriteRenderer spriteR = npcRenderer as SpriteRenderer;
-        if (spriteR != null && spriteR.transform != null && Camera.main != null)
-        {
-            // Make the sprite face the camera (billboard effect)
-            spriteR.transform.rotation = Quaternion.LookRotation(Camera.main.transform.forward);
-            
-            // If the NPC is moving, update flipX based on movement direction relative to camera view
-            if (networkIsMoving.Value && IsServer)
-            {
-                // Calculate movement direction in world space
-                Vector3 movementDir = Vector3.zero;
-                if (!inGroup)
-                {
-                    // Regular movement - direction is toward destination
-                    movementDir = (currentDestination - transform.position).normalized;
-                }
-                else
-                {
-                    // Group movement - direction is toward formation position
-                    movementDir = (formationTargetPos - transform.position).normalized;
-                }
-                
-                // Project movement direction onto camera's right vector to determine if moving left or right relative to camera view
-                float movementDot = Vector3.Dot(movementDir, Camera.main.transform.right);
-                
-                // Update flipX based on relative movement direction
-                if (Mathf.Abs(movementDot) > 0.01f) // Only update if there's significant horizontal movement
-                {
-                    networkSpriteFlipX.Value = (movementDot < 0); // Flip if moving left relative to camera
-                }
-            }
-        }
-    }
-
     private void SetTintColor(Color color)
     {
         if (npcRenderer != null)
@@ -357,65 +278,45 @@ public class NPCController : NetworkBehaviour
     // Pick a random destination within the allowed area that is not inside a forbidden area
     private void PickNewDestination()
     {
-        const int maxPickAttempts = 10; // Max attempts to find a clear destination
-        // float buffer = 0.5f; // Buffer to keep away from edges of allowed area and forbidden zones // Replaced by npcClearanceRadius logic
+        const int maxPickAttempts = 30; 
 
         for (int attempt = 0; attempt < maxPickAttempts; attempt++)
         {
-            // Adjust allowed area size by the npcClearanceRadius to avoid picking points too close to the boundary of the allowed area itself
-            float effectiveAllowedX = Mathf.Max(0, allowedAreaSize.x - 2 * npcClearanceRadius);
-            float effectiveAllowedZ = Mathf.Max(0, allowedAreaSize.z - 2 * npcClearanceRadius);
-
             Vector3 randomPoint = allowedAreaCenter + new Vector3(
-                Random.Range(-effectiveAllowedX / 2f, effectiveAllowedX / 2f),
-                0, // Assuming NPCs move on a flat plane relative to allowedAreaCenter. Adjust if Y varies.
-                Random.Range(-effectiveAllowedZ / 2f, effectiveAllowedZ / 2f)
+                Random.Range(-allowedAreaSize.x / 2f, allowedAreaSize.x / 2f),
+                0, 
+                Random.Range(-allowedAreaSize.z / 2f, allowedAreaSize.z / 2f)
             );
 
-            // 1. Check if the point itself (considering NPC clearance) is in a forbidden area
-            if (IsPointInForbiddenArea(randomPoint, npcClearanceRadius))
+            if (IsPointInForbiddenArea(randomPoint)) 
             {
-                continue; // Try another point
+                continue; 
             }
 
-            // 2. Proactive Path Check: Raycast to see if the path to this point is clear of critical obstacles
             Vector3 currentPosition = rb != null ? rb.position : transform.position;
             Vector3 directionToRandomPoint = (randomPoint - currentPosition).normalized;
             float distanceToRandomPoint = Vector3.Distance(currentPosition, randomPoint);
 
-            // Ensure we don't raycast with zero distance if NPC is already at the randomPoint (unlikely here but good practice)
             if (distanceToRandomPoint > 0.01f)
             {
-                // Use the collisionUnstuckLayers for this check as well, or a dedicated one if needed.
                 if (Physics.Raycast(currentPosition, directionToRandomPoint, out RaycastHit hitInfo, distanceToRandomPoint, collisionUnstuckLayers))
                 {
-                    // Debug.Log($"[NPC_PATH_BLOCKED] NPC '{gameObject.name}': Proposed path to {randomPoint} is blocked by '{hitInfo.collider.name}' on a critical layer. Attempting to find new destination (Attempt: {attempt + 1}/{maxPickAttempts}).");
-                    continue; // Path is blocked, try to pick another destination
+                    continue; 
                 }
             }
             
-            // If both checks pass, this is a good destination
             currentDestination = randomPoint;
             networkDestination.Value = randomPoint;
             Debug.Log($"[NPC_DESTINATION] NPC '{gameObject.name}' picked new destination: {currentDestination}");
             return;
         }
 
-        // Fallback: Could not find a suitable clear destination after several attempts.
-        // Stay at current position or pick the last tried random point even if potentially blocked (less ideal).
-        Debug.LogWarning($"[NPC_DESTINATION_FAIL] NPC '{gameObject.name}' (ID: {NetworkObjectId}): Failed to find a clear new destination after {maxPickAttempts} attempts. NPC may remain static or behave erratically. Current Position: {transform.position}. Last tried randomPoint: {currentDestination} (this might be the NPC's current position if all attempts failed early)");
-        // Setting destination to current position is problematic if current position itself is bad.
-        // For now, we still set it, but the NPC should ideally enter a different state or retry later.
+        Debug.LogWarning($"[NPC_DESTINATION_FAIL] NPC '{gameObject.name}' (ID: {NetworkObjectId}): Failed to find a clear new destination after {maxPickAttempts} attempts. NPC may remain static or behave erratically. Current Position: {transform.position}. Last tried randomPoint: {currentDestination}");
         currentDestination = transform.position; 
         networkDestination.Value = transform.position;
     }
 
     private bool IsPointInForbiddenArea(Vector3 point)
-    {
-        return IsPointInForbiddenArea(point, 0f); // Default to no clearance if not specified
-    }
-
-    private bool IsPointInForbiddenArea(Vector3 point, float clearanceRadius)
     {
         if (forbiddenAreaObjects == null) return false;
         foreach (var obj in forbiddenAreaObjects)
@@ -423,16 +324,9 @@ public class NPCController : NetworkBehaviour
             if (obj != null)
             {
                 BoxCollider area = obj.GetComponent<BoxCollider>();
-                if (area != null)
+                if (area != null && area.bounds.Contains(point))
                 {
-                    Bounds expandedBounds = area.bounds;
-                    // Expand the bounds by the clearance diameter (clearanceRadius * 2)
-                    // The point itself should not be within these expanded bounds.
-                    expandedBounds.Expand(clearanceRadius * 2.0f); 
-                    if (expandedBounds.Contains(point))
-                    {
-                        return true;
-                    }
+                    return true;
                 }
             }
         }
@@ -477,13 +371,10 @@ public class NPCController : NetworkBehaviour
 
                     // Compute proposed new position using currentActualPosition
                     Vector3 proposedPos = currentActualPosition + direction * walkSpeed * Time.deltaTime;
-                    // If the proposed position (considering NPC clearance) is NOT in a forbidden area, move there; otherwise, choose a new destination
-                    if(!IsPointInForbiddenArea(proposedPos, npcClearanceRadius)) {
+                    if(!IsPointInForbiddenArea(proposedPos)) {
                         if (rb != null) rb.MovePosition(proposedPos); else transform.position = proposedPos;
                         networkPosition.Value = proposedPos;
-                        
-                        // Make the sprite face the camera - this will handle both billboard effect and proper sprite orientation
-                        MakeSpritesFaceCamera();
+                        if(IsServer) MakeSpritesFaceCamera();
                     } else {
                         PickNewDestination();
                     }
@@ -496,24 +387,21 @@ public class NPCController : NetworkBehaviour
     // Updated GroupingRoutine to add per-iteration random delay when not grouping
     private IEnumerator GroupingRoutine()
     {
-        // Add a small random delay at start
         yield return new WaitForSeconds(Random.Range(0f, 3f));
         while (true)
         {
             if (!IsServer) yield break;
 
             if (serverIsUnsticking) {
-                networkIsMoving.Value = true; // Keep animation if desired
-                yield return null; // Let the UnstuckRoutine do its job
+                networkIsMoving.Value = true; 
+                yield return null; 
                 continue;
             }
 
-            // Only process grouping if behavior is WalksAndGroups
             if(behavior != NPCBehavior.WalksAndGroups) {
                 yield break;
             }
 
-            // Only attempt grouping if grouping is enabled for this NPC
             if(!groupingEnabled) {
                 yield return null;
                 continue;
@@ -521,9 +409,7 @@ public class NPCController : NetworkBehaviour
 
             if (!inGroup)
             {
-                // Wait a random duration between grouping attempts
                 yield return new WaitForSeconds(Random.Range(1f, 3f));
-                // First, try to join an existing group
                 Collider[] groupColliders = Physics.OverlapSphere(transform.position, groupRadius * 2f);
                 List<NPCController> existingGroup = new List<NPCController>();
                 foreach (Collider col in groupColliders)
@@ -536,11 +422,9 @@ public class NPCController : NetworkBehaviour
                 }
                 if(existingGroup.Count > 0)
                 {
-                    // Calculate the group center
                     Vector3 groupCenter = Vector3.zero;
                     foreach(var member in existingGroup) { groupCenter += member.transform.position; }
                     groupCenter /= existingGroup.Count;
-                    // Count how many are close to the group center
                     int count = 0;
                     foreach(var member in existingGroup)
                     {
@@ -550,14 +434,13 @@ public class NPCController : NetworkBehaviour
                     if(count < maxGroupSize)
                     {
                         inGroup = true;
-                        timeInGroup = 0f;
-                        networkInGroup.Value = true;
+                        groupTimer = Random.Range(minGroupTime, maxGroupTime);
+                        networkInGroup.Value = true; 
                         ComputeFormationTarget();
                     }
                 }
                 else
                 {
-                    // No nearby group found, try to form a new group from non-group NPCs
                     Collider[] nonGroupColliders = Physics.OverlapSphere(transform.position, groupRadius);
                     List<NPCController> nearbyNPCs = new List<NPCController>();
                     foreach (Collider col in nonGroupColliders)
@@ -571,31 +454,19 @@ public class NPCController : NetworkBehaviour
                     if(nearbyNPCs.Count + 1 >= minGroupSize && nearbyNPCs.Count + 1 <= maxGroupSize)
                     {
                         inGroup = true;
-                        timeInGroup = 0f;
-                        networkInGroup.Value = true;
-
-                        // Make all newly grouped NPCs also set their inGroup and networkInGroup
-                        foreach(var newMember in nearbyNPCs) {
-                            newMember.inGroup = true;
-                            newMember.networkInGroup.Value = true;
-                            newMember.timeInGroup = 0f;
-                            newMember.ComputeFormationTarget();
-                        }
+                        groupTimer = Random.Range(minGroupTime, maxGroupTime);
+                        networkInGroup.Value = true; 
                         ComputeFormationTarget();
                     }
                 }
             }
             else
             {
-                // If already in a group, handle leaving likelihood
-                timeInGroup += Time.deltaTime;
-                float currentLeaveProbability = baseLeaveChancePerSecond + (timeInGroup * leaveChanceIncreaseRatePerSecond);
-                
-                if (Random.value < currentLeaveProbability * Time.deltaTime)
+                groupTimer -= Time.deltaTime;
+                if(groupTimer <= 0f)
                 {
                     inGroup = false;
-                    networkInGroup.Value = false;
-                    timeInGroup = 0f;
+                    networkInGroup.Value = false; 
                     PickNewDestination();
                 }
             }
@@ -687,9 +558,6 @@ public class NPCController : NetworkBehaviour
             {
                 // Apply billboard effect
                 spriteR.transform.rotation = Quaternion.LookRotation(Camera.main.transform.forward);
-                
-                // Apply the network-synced flipX value
-                spriteR.flipX = networkSpriteFlipX.Value;
             }
         }
     }
@@ -701,10 +569,9 @@ public class NPCController : NetworkBehaviour
         float distanceToTarget = Vector3.Distance(rb != null ? rb.position : transform.position, formationTargetPos);
         
         if(distanceToTarget > destinationTolerance) {
-            // Still moving toward formation position
             networkIsMoving.Value = true;
             
-            if(!IsPointInForbiddenArea(proposedGroupPos, npcClearanceRadius)) {
+            if(!IsPointInForbiddenArea(proposedGroupPos)) {
                 if (rb != null) rb.MovePosition(proposedGroupPos); else transform.position = proposedGroupPos;
                 networkPosition.Value = proposedGroupPos;
             }
@@ -912,5 +779,42 @@ public class NPCController : NetworkBehaviour
         serverIsUnsticking = false;
         activeUnstuckingCoroutine = null;
         // networkIsMoving.Value will be controlled by MovementRoutine now
+    }
+
+    // Make sprites face the camera (billboard effect) while maintaining correct movement direction
+    private void MakeSpritesFaceCamera()
+    {
+        SpriteRenderer spriteR = npcRenderer as SpriteRenderer;
+        if (spriteR != null && spriteR.transform != null && Camera.main != null)
+        {
+            // Make the sprite face the camera (billboard effect)
+            spriteR.transform.rotation = Quaternion.LookRotation(Camera.main.transform.forward);
+            
+            // If the NPC is moving, update flipX based on movement direction relative to camera view
+            if (networkIsMoving.Value && IsServer)
+            {
+                // Calculate movement direction in world space
+                Vector3 movementDir = Vector3.zero;
+                if (!inGroup)
+                {
+                    // Regular movement - direction is toward destination
+                    movementDir = (currentDestination - transform.position).normalized;
+                }
+                else
+                {
+                    // Group movement - direction is toward formation position
+                    movementDir = (formationTargetPos - transform.position).normalized;
+                }
+                
+                // Project movement direction onto camera's right vector to determine if moving left or right relative to camera view
+                float movementDot = Vector3.Dot(movementDir, Camera.main.transform.right);
+                
+                // Update flipX based on relative movement direction
+                if (Mathf.Abs(movementDot) > 0.01f) // Only update if there's significant horizontal movement
+                {
+                    networkSpriteFlipX.Value = (movementDot < 0); // Flip if moving left relative to camera
+                }
+            }
+        }
     }
 } 
