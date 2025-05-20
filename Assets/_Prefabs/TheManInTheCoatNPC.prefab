@@ -93,9 +93,9 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 657204650503495020}
-  - component: {fileID: 3879874863887253514}
   - component: {fileID: 923334018254615283}
   - component: {fileID: 2109716159598790390}
+  - component: {fileID: 3879874863887253514}
   - component: {fileID: 1445705022477998449}
   - component: {fileID: 5579437178170355664}
   - component: {fileID: 3263228038656320928}
@@ -123,27 +123,6 @@ Transform:
   - {fileID: 1163819008692052922}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!95 &3879874863887253514
-Animator:
-  serializedVersion: 5
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 5964388756769884995}
-  m_Enabled: 1
-  m_Avatar: {fileID: 0}
-  m_Controller: {fileID: 9100000, guid: e6295914bd2e74fd7865ae1676789f38, type: 2}
-  m_CullingMode: 0
-  m_UpdateMode: 0
-  m_ApplyRootMotion: 0
-  m_LinearVelocityBlending: 0
-  m_StabilizeFeet: 0
-  m_WarningMessage: 
-  m_HasTransformHierarchy: 1
-  m_AllowConstantClipSamplingOptimization: 1
-  m_KeepAnimatorStateOnDisable: 0
-  m_WriteDefaultValuesOnDisable: 0
 --- !u!114 &923334018254615283
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -172,13 +151,13 @@ CapsuleCollider:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 5964388756769884995}
-  m_Material: {fileID: 13400000, guid: 5da953d1002664084bce34c5fb9f844a, type: 2}
+  m_Material: {fileID: 0}
   m_IncludeLayers:
     serializedVersion: 2
     m_Bits: 0
   m_ExcludeLayers:
     serializedVersion: 2
-    m_Bits: 0
+    m_Bits: 1
   m_LayerOverridePriority: 0
   m_IsTrigger: 1
   m_ProvidesContacts: 0
@@ -188,6 +167,27 @@ CapsuleCollider:
   m_Height: 1
   m_Direction: 1
   m_Center: {x: 0, y: 0, z: 0}
+--- !u!95 &3879874863887253514
+Animator:
+  serializedVersion: 5
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5964388756769884995}
+  m_Enabled: 1
+  m_Avatar: {fileID: 0}
+  m_Controller: {fileID: 9100000, guid: e6295914bd2e74fd7865ae1676789f38, type: 2}
+  m_CullingMode: 0
+  m_UpdateMode: 0
+  m_ApplyRootMotion: 0
+  m_LinearVelocityBlending: 0
+  m_StabilizeFeet: 0
+  m_WarningMessage: 
+  m_HasTransformHierarchy: 1
+  m_AllowConstantClipSamplingOptimization: 1
+  m_KeepAnimatorStateOnDisable: 0
+  m_WriteDefaultValuesOnDisable: 0
 --- !u!114 &1445705022477998449
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -200,40 +200,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 45f049b7bce8f4dc588f0f65e6bc8589, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  allowedAreaCenter: {x: 0, y: 0, z: 0.35}
-  allowedAreaSize: {x: 21.28, y: 0, z: 13.39}
-  forbiddenAreaObjects: []
-  walkSpeed: 2
-  rotationSpeed: 0
-  destinationTolerance: 0.2
-  inGroup: 0
-  groupRadius: 1
-  minGroupTime: 10
-  maxGroupTime: 25
-  minGroupSize: 3
-  maxGroupSize: 5
-  baseLeaveChancePerSecond: 0.02
-  leaveChanceIncreaseRatePerSecond: 0.01
-  tintColors:
-  - {r: 1, g: 0.11792451, b: 0.11792451, a: 1}
-  - {r: 0.51808506, g: 1, b: 0.11764705, a: 1}
-  - {r: 1, g: 0.873364, b: 0.11764705, a: 1}
-  - {r: 0.11764705, g: 0.6450505, b: 1, a: 1}
-  - {r: 0.79766256, g: 0.11764705, b: 1, a: 1}
-  - {r: 0, g: 0, b: 0, a: 1}
+  maxIdleTime: 5
+  maxRunTime: 10
+  wanderRadius: 100
   npcAnimator: {fileID: 3879874863887253514}
-  stuckTimeThreshold: 0.3
-  stuckDistanceThreshold: 0.5
-  stuckCheckRadius: 0.6
-  obstacleDetectionLayerMask:
-    serializedVersion: 2
-    m_Bits: 392
-  collisionUnstuckLayers:
-    serializedVersion: 2
-    m_Bits: 392
-  unstuckMoveDistance: 1
-  unstuckMoveSpeed: 1.5
-  npcClearanceRadius: 0.5
 --- !u!54 &5579437178170355664
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -253,7 +223,7 @@ Rigidbody:
     m_Bits: 0
   m_ExcludeLayers:
     serializedVersion: 2
-    m_Bits: 0
+    m_Bits: 1
   m_ImplicitCom: 1
   m_ImplicitTensor: 1
   m_UseGravity: 0

@@ -101,7 +101,7 @@ GameObject:
   - component: {fileID: 3592011900935465478}
   m_Layer: 0
   m_Name: TheAgentNPC
-  m_TagString: Player
+  m_TagString: NPC
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -151,13 +151,13 @@ CapsuleCollider:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 5964388756769884995}
-  m_Material: {fileID: 13400000, guid: 5da953d1002664084bce34c5fb9f844a, type: 2}
+  m_Material: {fileID: 0}
   m_IncludeLayers:
     serializedVersion: 2
     m_Bits: 0
   m_ExcludeLayers:
     serializedVersion: 2
-    m_Bits: 0
+    m_Bits: 1
   m_LayerOverridePriority: 0
   m_IsTrigger: 0
   m_ProvidesContacts: 0
@@ -200,37 +200,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 45f049b7bce8f4dc588f0f65e6bc8589, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  allowedAreaCenter: {x: 0, y: 0, z: 0.35}
-  allowedAreaSize: {x: 21.28, y: 0, z: 13.39}
-  forbiddenAreaObjects: []
-  walkSpeed: 2
-  rotationSpeed: 0
-  destinationTolerance: 0.2
-  inGroup: 0
-  groupRadius: 1
-  minGroupTime: 10
-  maxGroupTime: 25
-  minGroupSize: 3
-  maxGroupSize: 5
-  tintColors:
-  - {r: 1, g: 0.11792451, b: 0.11792451, a: 1}
-  - {r: 0.51808506, g: 1, b: 0.11764705, a: 1}
-  - {r: 1, g: 0.873364, b: 0.11764705, a: 1}
-  - {r: 0.11764705, g: 0.6450505, b: 1, a: 1}
-  - {r: 0.79766256, g: 0.11764705, b: 1, a: 1}
-  - {r: 0, g: 0, b: 0, a: 1}
+  maxIdleTime: 5
+  maxRunTime: 10
+  wanderRadius: 100
   npcAnimator: {fileID: 5384561374944021589}
-  stuckTimeThreshold: 0.3
-  stuckDistanceThreshold: 0.5
-  stuckCheckRadius: 0.6
-  obstacleDetectionLayerMask:
-    serializedVersion: 2
-    m_Bits: 392
-  collisionUnstuckLayers:
-    serializedVersion: 2
-    m_Bits: 392
-  unstuckMoveDistance: 1
-  unstuckMoveSpeed: 1.5
 --- !u!54 &7724191971257231475
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -250,7 +223,7 @@ Rigidbody:
     m_Bits: 0
   m_ExcludeLayers:
     serializedVersion: 2
-    m_Bits: 0
+    m_Bits: 1
   m_ImplicitCom: 1
   m_ImplicitTensor: 1
   m_UseGravity: 0

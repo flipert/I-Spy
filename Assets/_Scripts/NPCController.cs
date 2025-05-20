@@ -1,820 +1,294 @@
 using UnityEngine;
-using System.Collections;
-using System.Collections.Generic;
+using UnityEngine.AI;
 using Unity.Netcode;
+using System.Collections; // For Random.Range if needed beyond simple time
 
+[RequireComponent(typeof(NavMeshAgent))]
 public class NPCController : NetworkBehaviour
 {
-    [Header("Area Settings")]
-    [Tooltip("Center of the allowed area where the NPC can walk")]
-    public Vector3 allowedAreaCenter = Vector3.zero;
-    [Tooltip("Size of the allowed area (only X and Z are considered)")]
-    public Vector3 allowedAreaSize = new Vector3(10f, 0, 10f);
-    [Tooltip("List of GameObjects that contain BoxColliders which the NPC should avoid entering")]
-    public GameObject[] forbiddenAreaObjects;
+    [Header("State Timers")]
+    [Tooltip("Maximum time (seconds) the NPC will stay in Idle state.")]
+    public float maxIdleTime = 5f;
+    [Tooltip("Maximum time (seconds) the NPC will stay in Running state (or until destination is reached).")]
+    public float maxRunTime = 10f;
+    [Tooltip("Radius within which to pick a new random destination.")]
+    public float wanderRadius = 20f;
 
-    [Header("Movement Settings")]
-    [Tooltip("Walking speed of the NPC")]
-    public float walkSpeed = 2f;
-    [Tooltip("Speed at which the NPC rotates towards its target direction")]
-    public float rotationSpeed = 2f;
-    [Tooltip("Distance threshold to consider that the destination has been reached")]
-    public float destinationTolerance = 0.2f;
-    
-    // Network variables for synchronization
+    [Header("Animation")]
+    [Tooltip("Animator component from the NPC prefab. Expecting a 'Running' boolean parameter.")]
+    public Animator npcAnimator;
+    private SpriteRenderer characterSpriteRenderer; // Specifically for the character sprite
+    private Rigidbody rb; // Moved Rigidbody declaration here
+
+    // Network Variables
     private NetworkVariable<Vector3> networkPosition = new NetworkVariable<Vector3>(Vector3.zero, 
         NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
-    private NetworkVariable<Vector3> networkDestination = new NetworkVariable<Vector3>(Vector3.zero,
-        NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
-    private NetworkVariable<bool> networkInGroup = new NetworkVariable<bool>(false,
-        NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
-    private NetworkVariable<Color> networkTintColor = new NetworkVariable<Color>(Color.white,
+    private NetworkVariable<Vector3> networkAgentDestination = new NetworkVariable<Vector3>(Vector3.zero, 
         NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
     private NetworkVariable<bool> networkIsMoving = new NetworkVariable<bool>(false,
         NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
-    private NetworkVariable<bool> networkSpriteFlipX = new NetworkVariable<bool>(false,
+    private NetworkVariable<bool> networkSpriteFlipX = new NetworkVariable<bool>(false, // For sprite orientation
         NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
         
-    // Local cached values
-    private Vector3 currentDestination;
-    
-    [Header("Group Settings")]
-    [Tooltip("Whether this NPC is currently part of a group")]
-    public bool inGroup = false;
-    [Tooltip("Radius to check for nearby NPCs for grouping")]
-    public float groupRadius = 3f;
-    [Tooltip("Minimum time (in seconds) an NPC stays in a group")]
-    public float minGroupTime = 15f;
-    [Tooltip("Maximum time (in seconds) an NPC stays in a group")]
-    public float maxGroupTime = 30f;
-    [Tooltip("Minimum number of NPCs (including this one) required to form a group")]
-    public int minGroupSize = 3;
-    [Tooltip("Maximum number of NPCs allowed in a group")]
-    public int maxGroupSize = 5;
-    private float groupTimer = 0f;
-    private Vector3 formationTargetPos;
+    // Internal State
+    private NavMeshAgent agent;
+    private float currentStateTimer;
+    private bool serverIsRunningState;
 
-    [Header("Random Tint")]
-    [Tooltip("Array of up to 6 tint colors that can be randomly assigned to the NPC")]
-    public Color[] tintColors;
-    private Renderer npcRenderer;
-
-    [Header("Animation")]
-    [Tooltip("Animator component from the NPC prefab. Expecting two states: Idle and Running.")]
-    public Animator npcAnimator;
-
-    // Declare new variable at the top of the class (after existing private variables)
-    private bool groupingEnabled = false;
-
-    // Add this enum and variable at the top of the class, below existing private variables
-    enum NPCBehavior { Walker, WalksAndGroups }
-    private NPCBehavior behavior;
-    private Rigidbody rb; // Add Rigidbody reference
-
-    // Stuck Detection Variables
-    [Header("Stuck Detection (Server-Side)")]
-    [Tooltip("Time (seconds) an NPC must be 'slow' while walking before checking if stuck.")]
-    public float stuckTimeThreshold = 2.0f;
-    [Tooltip("Max distance moved during stuckTimeThreshold to be considered stuck.")]
-    public float stuckDistanceThreshold = 0.5f;
-    [Tooltip("Radius to check for colliders when NPC is suspected of being stuck.")]
-    public float stuckCheckRadius = 0.6f;
-    [Tooltip("Layers to check for obstacles when NPC is suspected of being stuck.")]
-    public LayerMask obstacleDetectionLayerMask;
-
-    [Header("Unstucking Settings (Server-Side)")]
-    [Tooltip("Layers that will trigger the unsticking behavior upon collision (e.g., Buildings, Props).")]
-    public LayerMask collisionUnstuckLayers;
-    [Tooltip("How far the NPC will attempt to move away from an obstacle when unsticking.")]
-    public float unstuckMoveDistance = 1.0f;
-    [Tooltip("Speed of the NPC when performing the unsticking movement.")]
-    public float unstuckMoveSpeed = 1.5f;
-
-    private Vector3 lastPositionCheck;
-    private float stuckTimer;
-    private bool serverIsUnsticking = false;
-    private Coroutine activeUnstuckingCoroutine = null;
+    // Add Awake to set Rigidbody to kinematic if present
+    void Awake()
+    {
+        rb = GetComponent<Rigidbody>();
+        if (rb != null)
+        {
+            rb.isKinematic = true; 
+        }
+        // NavMeshAgent is retrieved in OnNetworkSpawn or can be here too if preferred.
+        // For now, keeping agent retrieval in OnNetworkSpawn as it was.
+    }
 
     public override void OnNetworkSpawn()
     {
         base.OnNetworkSpawn();
-        Debug.Log($"NPCController spawned on network. Object Name: {gameObject.name}, NetworkObjectId: {NetworkObjectId}, IsOwner: {IsOwner}, IsServer: {IsServer}");
-        
-        // Find renderer
-        npcRenderer = GetComponent<Renderer>();
-        // If the root doesn't have a renderer, try finding a child named "Character"
-        if(npcRenderer == null)
+
+        agent = GetComponent<NavMeshAgent>();
+        if (agent != null)
         {
-            Transform characterTransform = transform.Find("Character");
-            if(characterTransform != null)
-            {
-                npcRenderer = characterTransform.GetComponent<Renderer>();
-            }
+            agent.updateRotation = false; // Prevent NavMeshAgent from rotating the parent GameObject
         }
+
+        if (npcAnimator == null) npcAnimator = GetComponentInChildren<Animator>();
         
-        // Get the Animator component
-        if(npcAnimator == null)
+        // Find the Character child and its SpriteRenderer
+        Transform characterTransform = transform.Find("Character");
+        if (characterTransform != null)
         {
-            npcAnimator = GetComponent<Animator>();
-            if(npcAnimator == null)
-            {
-                Transform characterTransform = transform.Find("Character");
-                if(characterTransform != null)
-                {
-                    npcAnimator = characterTransform.GetComponent<Animator>();
-                }
-            }
+            characterSpriteRenderer = characterTransform.GetComponent<SpriteRenderer>();
         }
-        
-        // Get the Rigidbody component
-        rb = GetComponent<Rigidbody>();
-        if (rb == null)
-        {
-            Debug.LogError($"NPCController on {gameObject.name} is missing a Rigidbody component! Movement will not work correctly.", this);
-        }
-        
-        // Subscribe to network variable change events
-        networkTintColor.OnValueChanged += OnTintColorChanged;
-        networkPosition.OnValueChanged += OnPositionChanged;
-        networkIsMoving.OnValueChanged += OnMovingChanged;
-        
-        // If we are the client, apply initial values
+
+        if (agent == null)
+            Debug.LogError($"NPCController on {gameObject.name} is missing a NavMeshAgent component!", this);
+        if (npcAnimator == null)
+            Debug.LogWarning($"NPCController on {gameObject.name} is missing an Animator component or it's not assigned to the root.", this);
+        if (characterSpriteRenderer == null)
+            Debug.LogWarning($"NPCController on {gameObject.name} could not find a SpriteRenderer on a child named 'Character'.", this);
+
         if (!IsServer)
         {
-            // Apply the current network position
-            if (rb != null) // Interpolate if Rigidbody is present
-            {
-                rb.MovePosition(networkPosition.Value);
-            }
-            else // Fallback if no Rigidbody (should not happen)
-            {
-                transform.position = networkPosition.Value;
-            }
-            
-            // Apply the current tint color
-            if (npcRenderer != null)
-            {
-                SetTintColor(networkTintColor.Value);
-            }
-            
-            // Apply animation state
-            if (npcAnimator != null)
-            {
-                npcAnimator.SetBool("Running", networkIsMoving.Value);
-            }
+            networkPosition.OnValueChanged += ClientOnPositionChanged;
+            networkIsMoving.OnValueChanged += ClientOnIsMovingChanged;
+            networkAgentDestination.OnValueChanged += ClientOnAgentDestinationChanged;
+            // No specific OnValueChanged for networkSpriteFlipX, clients read it in Update
+
+            ApplyCurrentNetworkState();
         }
-        
-        // Server-only initialization
-        if (IsServer)
+        else // Server initializes state
         {
-            // Server-side initialization
-            ServerInit();
+            agent.Warp(transform.position); // Ensure agent is at the spawned position
+            DecideNextState();
         }
     }
-    
-    private void ServerInit()
+
+    private void ClientOnPositionChanged(Vector3 previousValue, Vector3 newValue)
     {
-        // Automatically find forbidden area objects tagged as "Boundary" if not assigned
-        if ((forbiddenAreaObjects == null || forbiddenAreaObjects.Length == 0))
+        // Clients simply observe the position, agent movement is handled by server.
+        // Smooth movement is handled in Update.
+        if (agent != null && !agent.isOnNavMesh) // If somehow off NavMesh, try to warp
         {
-            forbiddenAreaObjects = GameObject.FindGameObjectsWithTag("Boundary");
+            agent.Warp(newValue);
         }
-
-        if (tintColors != null && tintColors.Length > 0)
-        {
-            int idx = Random.Range(0, Mathf.Min(tintColors.Length, 6));
-            Color selectedColor = tintColors[idx];
-            networkTintColor.Value = selectedColor;
-            SetTintColor(selectedColor);
-        }
-
-        behavior = (Random.value < 0.5f) ? NPCBehavior.Walker : NPCBehavior.WalksAndGroups;
-
-        if(behavior == NPCBehavior.WalksAndGroups) {
-            if(Random.value < 0.4f) {
-                inGroup = true;
-                networkInGroup.Value = true;
-                groupingEnabled = true;
-                groupTimer = Random.Range(minGroupTime, maxGroupTime);
-                ComputeFormationTarget();
-            } else {
-                StartCoroutine(EnableGroupingAfterDelay(10f));
-            }
-        } else {
-            inGroup = false;
-            networkInGroup.Value = false;
-        }
-
-        PickNewDestination();
-        StartCoroutine(MovementRoutine());
-        if(behavior == NPCBehavior.WalksAndGroups) {
-            StartCoroutine(GroupingRoutine());
-        }
-
-        transform.localScale = Vector3.one;
-
-        // Reverted spawn position check
-        if(IsPointInForbiddenArea(transform.position)) { 
-            Debug.LogWarning($"NPCController: NPC '{gameObject.name}' spawned in a forbidden area at {transform.position}. Picking new destination.");
-            PickNewDestination(); 
-        }
-
-        lastPositionCheck = transform.position;
-        stuckTimer = 0f;
-        serverIsUnsticking = false;
     }
-    
-    private void OnTintColorChanged(Color previousValue, Color newValue)
+
+    private void ClientOnAgentDestinationChanged(Vector3 previousValue, Vector3 newValue)
     {
-        SetTintColor(newValue);
+        // For clients, if we want them to *also* path for smoother visuals (optional advanced)
+        // For now, clients mostly rely on networkPosition for movement lerping.
+        // However, setting the agent's destination can be useful for visual debugging or if agent.remainingDistance is used by client.
+        if (agent != null && agent.isOnNavMesh && agent.destination != newValue)
+        {
+            // agent.SetDestination(newValue); // Potentially enable if client-side pathing is desired for prediction
+        }
     }
-    
-    private void OnPositionChanged(Vector3 previousValue, Vector3 newValue)
+
+    private void ClientOnIsMovingChanged(bool previousValue, bool newValue)
     {
-        if (!IsServer && rb != null) // Only clients move, and only if rb exists
-        {
-            // Instead of directly setting transform.position,
-            // we let the Update loop handle interpolation via rb.MovePosition
-            // towards the latest networkPosition.Value.
-            // So, this callback might not need to do anything for position if
-            // non-local NPC movement is handled in Update/LateUpdate via Lerp.
-            // However, for immediate snapping on change (less smooth):
-            // rb.MovePosition(newValue);
-            // For now, let's assume Update handles smooth movement for non-owners.
-        }
-        else if (!IsServer) // Fallback if no Rigidbody (should not happen)
-        {
-            transform.position = newValue;
-        }
+        if (npcAnimator != null) npcAnimator.SetBool("Running", newValue);
     }
-    
-    private void OnMovingChanged(bool previousValue, bool newValue)
+
+    private void ApplyCurrentNetworkState()
     {
-        if (npcAnimator != null)
+        if (rb != null && networkPosition.Value != Vector3.zero) // Check if Rigidbody exists and pos is valid
         {
-            npcAnimator.SetBool("Running", newValue);
+            rb.MovePosition(networkPosition.Value); // Snap to initial position
         }
-    }
-    
-    private void SetTintColor(Color color)
-    {
-        if (npcRenderer != null)
+        else if (networkPosition.Value != Vector3.zero)
         {
-            // Check if npcRenderer is a SpriteRenderer
-            SpriteRenderer spriteR = npcRenderer as SpriteRenderer;
-            if (spriteR != null)
-            {
-                spriteR.color = color;
-                Debug.Log("NPCController: Set tint color on SpriteRenderer to " + color);
-            }
-            else
-            {
-                npcRenderer.material.color = color;
-                Debug.Log("NPCController: Set tint color on Material to " + color);
-            }
+            transform.position = networkPosition.Value; // Snap to initial position
         }
+        if (agent != null && agent.isOnNavMesh && networkAgentDestination.Value != Vector3.zero)
+        {
+           // agent.SetDestination(networkAgentDestination.Value); // Optional: client sets initial destination
+        }
+        if (npcAnimator != null) npcAnimator.SetBool("Running", networkIsMoving.Value);
     }
 
-    // Pick a random destination within the allowed area that is not inside a forbidden area
-    private void PickNewDestination()
-    {
-        const int maxPickAttempts = 30; 
 
-        for (int attempt = 0; attempt < maxPickAttempts; attempt++)
-        {
-            Vector3 randomPoint = allowedAreaCenter + new Vector3(
-                Random.Range(-allowedAreaSize.x / 2f, allowedAreaSize.x / 2f),
-                0, 
-                Random.Range(-allowedAreaSize.z / 2f, allowedAreaSize.z / 2f)
-            );
-
-            if (IsPointInForbiddenArea(randomPoint)) 
-            {
-                continue; 
-            }
-
-            Vector3 currentPosition = rb != null ? rb.position : transform.position;
-            Vector3 directionToRandomPoint = (randomPoint - currentPosition).normalized;
-            float distanceToRandomPoint = Vector3.Distance(currentPosition, randomPoint);
-
-            if (distanceToRandomPoint > 0.01f)
-            {
-                if (Physics.Raycast(currentPosition, directionToRandomPoint, out RaycastHit hitInfo, distanceToRandomPoint, collisionUnstuckLayers))
-                {
-                    continue; 
-                }
-            }
-            
-            currentDestination = randomPoint;
-            networkDestination.Value = randomPoint;
-            Debug.Log($"[NPC_DESTINATION] NPC '{gameObject.name}' picked new destination: {currentDestination}");
-            return;
-        }
-
-        Debug.LogWarning($"[NPC_DESTINATION_FAIL] NPC '{gameObject.name}' (ID: {NetworkObjectId}): Failed to find a clear new destination after {maxPickAttempts} attempts. NPC may remain static or behave erratically. Current Position: {transform.position}. Last tried randomPoint: {currentDestination}");
-        currentDestination = transform.position; 
-        networkDestination.Value = transform.position;
-    }
-
-    private bool IsPointInForbiddenArea(Vector3 point)
-    {
-        if (forbiddenAreaObjects == null) return false;
-        foreach (var obj in forbiddenAreaObjects)
-        {
-            if (obj != null)
-            {
-                BoxCollider area = obj.GetComponent<BoxCollider>();
-                if (area != null && area.bounds.Contains(point))
-                {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    // Routine to control movement when not in a group
-    private IEnumerator MovementRoutine()
-    {
-        while (true)
-        {
-            if (!IsServer) yield break;
-
-            if (serverIsUnsticking) {
-                networkIsMoving.Value = true; // Keep animation if desired
-                yield return null; // Let the UnstuckRoutine do its job
-                continue;
-            }
-
-            if (!inGroup)
-            {
-                // Current position for calculations, preferring Rigidbody's position
-                Vector3 currentActualPosition = (rb != null) ? rb.position : transform.position;
-                
-                float distance = Vector3.Distance(currentActualPosition, currentDestination);
-                if (distance < destinationTolerance)
-                {
-                    // Update network moving state
-                    networkIsMoving.Value = false;
-                    
-                    // Pause briefly at destination before picking a new one
-                    yield return new WaitForSeconds(Random.Range(1f, 2f));
-                    PickNewDestination();
-                }
-                else
-                {
-                    // Update network moving state
-                    networkIsMoving.Value = true;
-                    
-                    // Compute movement direction towards the destination using currentActualPosition
-                    Vector3 direction = (currentDestination - currentActualPosition).normalized;
-
-                    // Compute proposed new position using currentActualPosition
-                    Vector3 proposedPos = currentActualPosition + direction * walkSpeed * Time.deltaTime;
-                    if(!IsPointInForbiddenArea(proposedPos)) {
-                        if (rb != null) rb.MovePosition(proposedPos); else transform.position = proposedPos;
-                        networkPosition.Value = proposedPos;
-                        if(IsServer) MakeSpritesFaceCamera();
-                    } else {
-                        PickNewDestination();
-                    }
-                }
-            }
-            yield return null;
-        }
-    }
-
-    // Updated GroupingRoutine to add per-iteration random delay when not grouping
-    private IEnumerator GroupingRoutine()
-    {
-        yield return new WaitForSeconds(Random.Range(0f, 3f));
-        while (true)
-        {
-            if (!IsServer) yield break;
-
-            if (serverIsUnsticking) {
-                networkIsMoving.Value = true; 
-                yield return null; 
-                continue;
-            }
-
-            if(behavior != NPCBehavior.WalksAndGroups) {
-                yield break;
-            }
-
-            if(!groupingEnabled) {
-                yield return null;
-                continue;
-            }
-
-            if (!inGroup)
-            {
-                yield return new WaitForSeconds(Random.Range(1f, 3f));
-                Collider[] groupColliders = Physics.OverlapSphere(transform.position, groupRadius * 2f);
-                List<NPCController> existingGroup = new List<NPCController>();
-                foreach (Collider col in groupColliders)
-                {
-                    NPCController npc = col.GetComponent<NPCController>();
-                    if(npc != null && npc.inGroup)
-                    {
-                        existingGroup.Add(npc);
-                    }
-                }
-                if(existingGroup.Count > 0)
-                {
-                    Vector3 groupCenter = Vector3.zero;
-                    foreach(var member in existingGroup) { groupCenter += member.transform.position; }
-                    groupCenter /= existingGroup.Count;
-                    int count = 0;
-                    foreach(var member in existingGroup)
-                    {
-                        if(Vector3.Distance(member.transform.position, groupCenter) < groupRadius * 2f)
-                            count++;
-                    }
-                    if(count < maxGroupSize)
-                    {
-                        inGroup = true;
-                        groupTimer = Random.Range(minGroupTime, maxGroupTime);
-                        networkInGroup.Value = true; 
-                        ComputeFormationTarget();
-                    }
-                }
-                else
-                {
-                    Collider[] nonGroupColliders = Physics.OverlapSphere(transform.position, groupRadius);
-                    List<NPCController> nearbyNPCs = new List<NPCController>();
-                    foreach (Collider col in nonGroupColliders)
-                    {
-                        NPCController npc = col.GetComponent<NPCController>();
-                        if(npc != null && npc != this && !npc.inGroup)
-                        {
-                            nearbyNPCs.Add(npc);
-                        }
-                    }
-                    if(nearbyNPCs.Count + 1 >= minGroupSize && nearbyNPCs.Count + 1 <= maxGroupSize)
-                    {
-                        inGroup = true;
-                        groupTimer = Random.Range(minGroupTime, maxGroupTime);
-                        networkInGroup.Value = true; 
-                        ComputeFormationTarget();
-                    }
-                }
-            }
-            else
-            {
-                groupTimer -= Time.deltaTime;
-                if(groupTimer <= 0f)
-                {
-                    inGroup = false;
-                    networkInGroup.Value = false; 
-                    PickNewDestination();
-                }
-            }
-        }
-    }
-
-    private void Update()
+    void Update()
     {
         if (IsServer)
         {
-            // Handle group movement if in a group
-            if (inGroup)
+            currentStateTimer -= Time.deltaTime;
+            if (currentStateTimer <= 0)
             {
-                HandleGroupMovement();
+                DecideNextState();
             }
 
-            // Stuck detection logic
-            if (networkIsMoving.Value)
+            networkPosition.Value = transform.position;
+            ServerHandleSpriteOrientation(); // Server decides flip
+
+            if (serverIsRunningState && agent != null && !agent.pathPending)
             {
-                stuckTimer += Time.deltaTime;
-                if (stuckTimer >= stuckTimeThreshold)
+                if (agent.remainingDistance <= agent.stoppingDistance)
                 {
-                    float distanceMoved = Vector3.Distance(transform.position, lastPositionCheck);
-                    if (distanceMoved < stuckDistanceThreshold)
+                    if (!agent.hasPath || agent.velocity.sqrMagnitude == 0f)
                     {
-                        // NPC might be stuck, check for colliders
-                        // Only run stuck alert if not currently trying to unstuck from a collision
-                        if (!serverIsUnsticking) 
-                        {
-                            Collider[] hitColliders = Physics.OverlapSphere(transform.position, stuckCheckRadius, obstacleDetectionLayerMask);
-                            if (hitColliders.Length > 0)
-                            {
-                                string colliderNames = "";
-                                foreach (var hitCollider in hitColliders)
-                                {
-                                    // Skip self
-                                    if (hitCollider.gameObject == gameObject) continue;
-                                    colliderNames += hitCollider.gameObject.name + (hitCollider.transform.parent ? " (Parent: " + hitCollider.transform.parent.name + ")" : "") + ", ";
-                                }
-                                if (!string.IsNullOrEmpty(colliderNames))
-                                {
-                                    Debug.LogWarning($"[NPC_STUCK_ALERT] NPC '{gameObject.name}' (ID: {NetworkObjectId}) might be stuck near {transform.position}. Detected obstacles: {colliderNames.TrimEnd(',', ' ')}");
-                                }
-                                else
-                                {
-                                    // This case might happen if the only colliders detected were the NPC itself, which we skip.
-                                    Debug.LogWarning($"[NPC_STUCK_ALERT] NPC '{gameObject.name}' (ID: {NetworkObjectId}) might be stuck near {transform.position}. No external obstacles detected on specified layers. Current Destination: {currentDestination}. Consider checking NavMesh or other movement logic.");
-                                }
-                            }
-                            else
-                            {
-                                Debug.LogWarning($"[NPC_STUCK_ALERT] NPC '{gameObject.name}' (ID: {NetworkObjectId}) might be stuck near {transform.position}. No obstacles detected on specified layers. Current Destination: {currentDestination}. Consider checking NavMesh.");
-                            }
-                        }
-                        lastPositionCheck = transform.position;
-                        stuckTimer = 0f;
+                        // Reached destination early
+                        currentStateTimer = 0; // Force state change
+                        // Debug.Log($"NPC {gameObject.name} reached destination early, switching state.");
                     }
                 }
             }
-            else
+
+            // Client-side billboarding and applying network flip
+            if (characterSpriteRenderer != null && Camera.main != null) // Use characterSpriteRenderer
             {
-                // Reset when not moving
-                lastPositionCheck = transform.position;
-                stuckTimer = 0f;
+                // Billboarding: Make sprite face the camera plane, keeping world up as sprite's up
+                characterSpriteRenderer.transform.rotation = Quaternion.LookRotation(Camera.main.transform.forward, Vector3.up);
+                // Apply synced flip
+                characterSpriteRenderer.flipX = networkSpriteFlipX.Value;
             }
         }
+        else // Client-side smoothing and animation
+        {
+            if (agent != null && agent.isOnNavMesh) // Use agent's current position if available
+            {
+                 transform.position = Vector3.Lerp(transform.position, networkPosition.Value, Time.deltaTime * 10f);
+            }
+            else // Fallback if no agent or off mesh
+            {
+                transform.position = Vector3.Lerp(transform.position, networkPosition.Value, Time.deltaTime * 10f);
+            }
+            // Animation is updated via OnValueChanged callback
+        }
+    }
 
-        // For non-server entities, smoothly move towards the networkPosition
-        if (!IsServer && rb != null) // Note: Changed 'else if' to 'if' to allow server to also execute billboard logic below
+    private void DecideNextState()
+    {
+        if (!IsServer) return;
+
+        if (serverIsRunningState) // Was running, now idle
         {
-            rb.MovePosition(Vector3.Lerp(rb.position, networkPosition.Value, Time.deltaTime * 10f)); // Similar to PlayerController
+            TransitionToIdle();
         }
-        else if (!IsServer) // Fallback if no Rigidbody
+        else // Was idle, now run
         {
-            transform.position = Vector3.Lerp(transform.position, networkPosition.Value, Time.deltaTime * 10f);
+            TransitionToRunning();
         }
-        
-        // Always make sprites face the camera
-        if (IsServer)
+    }
+
+    private void TransitionToIdle()
+    {
+        if (!IsServer) return;
+
+        // Debug.Log($"NPC {gameObject.name} transitioning to IDLE.");
+        serverIsRunningState = false;
+        if (agent != null && agent.isOnNavMesh) agent.isStopped = true;
+        networkIsMoving.Value = false;
+        if (npcAnimator != null) npcAnimator.SetBool("Running", false);
+        currentStateTimer = Random.Range(1f, maxIdleTime);
+    }
+
+    private void TransitionToRunning()
+    {
+        if (!IsServer) return;
+
+        // Debug.Log($"NPC {gameObject.name} transitioning to RUNNING.");
+        serverIsRunningState = true;
+        if (agent != null && agent.isOnNavMesh)
         {
-            // Server updates sprite orientation and sends to clients
-            MakeSpritesFaceCamera();
+            Vector3 randomNavMeshPoint = PickRandomNavMeshLocation(wanderRadius);
+            if (randomNavMeshPoint != Vector3.zero) // Vector3.zero indicates failure to find point
+            {
+                agent.SetDestination(randomNavMeshPoint);
+                agent.isStopped = false;
+                networkAgentDestination.Value = randomNavMeshPoint;
+                networkIsMoving.Value = true;
+                if (npcAnimator != null) npcAnimator.SetBool("Running", true);
+            }
+            else
+            {
+                // Failed to find a point, stay idle for a bit longer
+                // Debug.LogWarning($"NPC {gameObject.name} failed to find a NavMesh point. Staying idle.");
+                serverIsRunningState = false; // Revert to idle state logic for this cycle
+                networkIsMoving.Value = false;
+                if (npcAnimator != null) npcAnimator.SetBool("Running", false);
+                // currentStateTimer will be positive from previous idle, or we can set a short one
+                currentStateTimer = Random.Range(1f, maxIdleTime / 2f); // shorter idle if failed to run
+                return; // Skip setting full run timer
+            }
         }
         else
         {
-            // Clients only need to apply the billboard effect without changing flipX
-            SpriteRenderer spriteR = npcRenderer as SpriteRenderer;
-            if (spriteR != null && spriteR.transform != null && Camera.main != null)
-            {
-                // Apply billboard effect
-                spriteR.transform.rotation = Quaternion.LookRotation(Camera.main.transform.forward);
-            }
-        }
-    }
-
-    private void HandleGroupMovement()
-    {
-        float step = walkSpeed * Time.deltaTime;
-        Vector3 proposedGroupPos = Vector3.MoveTowards(rb != null ? rb.position : transform.position, formationTargetPos, step);
-        float distanceToTarget = Vector3.Distance(rb != null ? rb.position : transform.position, formationTargetPos);
-        
-        if(distanceToTarget > destinationTolerance) {
-            networkIsMoving.Value = true;
-            
-            if(!IsPointInForbiddenArea(proposedGroupPos)) {
-                if (rb != null) rb.MovePosition(proposedGroupPos); else transform.position = proposedGroupPos;
-                networkPosition.Value = proposedGroupPos;
-            }
-            
-            // Compute direction towards the formation target
-            Vector3 groupDirection = (formationTargetPos - transform.position).normalized;
-            
-            // Make the sprite face the camera - this will handle both billboard effect and proper sprite orientation
-            MakeSpritesFaceCamera();
-        } 
-        else {
-            // Reached formation position
-            if (rb != null) rb.MovePosition(formationTargetPos); else transform.position = formationTargetPos;
-            networkPosition.Value = formationTargetPos;
-            networkIsMoving.Value = false;
-            
-            // When in position, face toward the center of the circle
-            Collider[] colliders = Physics.OverlapSphere(transform.position, groupRadius * 2f);
-            List<NPCController> groupMembers = new List<NPCController>();
-            
-            foreach (Collider col in colliders)
-            {
-                NPCController npc = col.GetComponent<NPCController>();
-                if(npc != null && npc.inGroup)
-                {
-                    groupMembers.Add(npc);
-                }
-            }
-            
-            if(groupMembers.Count > 0) {
-                // Calculate group center
-                Vector3 groupCenter = Vector3.zero;
-                foreach(var member in groupMembers){ groupCenter += member.transform.position; }
-                groupCenter /= groupMembers.Count;
-                
-                // When stationary in group, face toward center
-                Vector3 directionToCenter = (groupCenter - transform.position).normalized;
-                
-                // Project direction to center onto camera's right vector
-                float directionDot = Vector3.Dot(directionToCenter, Camera.main.transform.right);
-                
-                SpriteRenderer spriteR = npcRenderer as SpriteRenderer;
-                if(spriteR != null && Mathf.Abs(directionDot) > 0.01f) {
-                    networkSpriteFlipX.Value = (directionDot < 0);
-                }
-                
-                // Make the sprite face the camera
-                MakeSpritesFaceCamera();
-            }
-        }
-
-        // Server already handles animation in the movement logic with networkIsMoving
-    }
-
-    private void ComputeFormationTarget()
-    {
-        Collider[] colliders = Physics.OverlapSphere(transform.position, groupRadius * 2f);
-        List<NPCController> groupMembers = new List<NPCController>();
-        foreach (Collider col in colliders)
-        {
-            NPCController npc = col.GetComponent<NPCController>();
-            if(npc != null && npc.inGroup)
-            {
-                groupMembers.Add(npc);
-            }
-        }
-
-        if(groupMembers.Count > 0)
-        {
-            // If the group is too large, only consider the closest maxGroupSize members
-            if(groupMembers.Count > maxGroupSize)
-            {
-                groupMembers.Sort((a, b) => Vector3.Distance(a.transform.position, transform.position)
-                    .CompareTo(Vector3.Distance(b.transform.position, transform.position)));
-                groupMembers = groupMembers.GetRange(0, maxGroupSize);
-                if(!groupMembers.Contains(this))
-                {
-                    // Should not happen, but fallback
+             // Agent not ready, go back to idle for safety
+            // Debug.LogWarning($"NPC {gameObject.name} NavMeshAgent not ready. Staying idle.");
+            TransitionToIdle(); // Try to idle instead
                     return;
-                }
-            }
-
-            // Compute formation center using current positions
-            Vector3 formationCenter = Vector3.zero;
-            foreach(var member in groupMembers){ formationCenter += member.transform.position; }
-            formationCenter /= groupMembers.Count;
-
-            // Sort group members by angle around the formation center
-            groupMembers.Sort((a, b) => {
-                float angleA = Mathf.Atan2(a.transform.position.z - formationCenter.z, a.transform.position.x - formationCenter.x);
-                float angleB = Mathf.Atan2(b.transform.position.z - formationCenter.z, b.transform.position.x - formationCenter.x);
-                return angleA.CompareTo(angleB);
-            });
-
-            int index = groupMembers.IndexOf(this);
-            float angle = (2 * Mathf.PI / groupMembers.Count) * index;
-            float formationRadius = 2.0f;
-            formationTargetPos = formationCenter + new Vector3(Mathf.Cos(angle), 0, Mathf.Sin(angle)) * formationRadius;
         }
+        currentStateTimer = Random.Range(1f, maxRunTime);
     }
 
-    // Optional: Visualize the allowed area and group radius in editor
-    private void OnDrawGizmosSelected()
+    private Vector3 PickRandomNavMeshLocation(float radius)
     {
-        Gizmos.color = Color.magenta;
-        Gizmos.DrawWireCube(allowedAreaCenter, allowedAreaSize);
-        Gizmos.color = Color.cyan;
-        Gizmos.DrawWireSphere(transform.position, groupRadius);
-        
-        // Visualize forbidden areas
-        if(forbiddenAreaObjects != null)
+        Vector3 randomDirection = Random.insideUnitSphere * radius;
+        randomDirection += transform.position; // Relative to current position
+        NavMeshHit hit;
+        if (NavMesh.SamplePosition(randomDirection, out hit, radius, NavMesh.AllAreas))
         {
-            Gizmos.color = Color.red;
-            foreach(var obj in forbiddenAreaObjects)
-            {
-                if(obj != null)
-                {
-                    BoxCollider col = obj.GetComponent<BoxCollider>();
-                    if(col != null)
-                    {
-                        Gizmos.DrawWireCube(col.bounds.center, col.bounds.size);
-                    }
-                }
-            }
+            return hit.position;
         }
+        // Debug.LogWarning($"NPC {gameObject.name} failed to sample position on NavMesh within radius {radius} around {transform.position}.");
+        return Vector3.zero; // Indicate failure
     }
 
-    // Add a new coroutine at the end of the class (before OnNetworkSpawn or after ComputeFormationTarget):
-    private IEnumerator EnableGroupingAfterDelay(float delaySeconds) {
-        yield return new WaitForSeconds(delaySeconds);
-        groupingEnabled = true;
-    }
-
-    // Called when a collision occurs and persists
-    private void OnCollisionStay(Collision collision)
+    private void ServerHandleSpriteOrientation()
     {
-        if (!IsServer || serverIsUnsticking || !networkIsMoving.Value) return;
+        if (!IsServer) return; 
 
-        // Check if the collision is with a layer that should trigger unstucking
-        if ((collisionUnstuckLayers.value & (1 << collision.gameObject.layer)) > 0)
+        if (networkIsMoving.Value && agent != null && agent.velocity.sqrMagnitude > 0.01f) 
         {
-            // Check contacts for a valid normal
-            if (collision.contactCount > 0)
-            {
-                ContactPoint contact = collision.contacts[0];
-                Vector3 awayDirection = contact.normal; // Normal points away from the obstacle
-
-                // Ensure awayDirection is somewhat horizontal if preferred, to avoid launching upwards on flat ground collisions
-                // For now, we use the direct normal.
-
-                Debug.Log($"[NPC_UNSTICKING] NPC '{gameObject.name}' collided with '{collision.gameObject.name}' on a critical layer. Attempting to unstuck.");
-
-                serverIsUnsticking = true;
-                // networkIsMoving.Value = false; // Stop regular movement processing by other routines briefly
-
-                if (activeUnstuckingCoroutine != null)
-                {
-                    StopCoroutine(activeUnstuckingCoroutine);
-                }
-                activeUnstuckingCoroutine = StartCoroutine(UnstuckRoutine(awayDirection));
-            }
-        }
-    }
-
-    private IEnumerator UnstuckRoutine(Vector3 awayDirection)
-    {
-        networkIsMoving.Value = true; // Ensure NPC is animated as moving
-
-        Vector3 startPosition = transform.position;
-        // Calculate target position slightly further than unstuckMoveDistance to ensure clearance
-        Vector3 targetUnstuckPosition = startPosition + awayDirection * (unstuckMoveDistance + 0.1f);
-        float journeyDuration = unstuckMoveDistance / unstuckMoveSpeed; 
-        float elapsedTime = 0f;
-
-        Debug.Log($"[NPC_UNSTICKING] Starting UnstuckRoutine for '{gameObject.name}'. Moving from {startPosition} towards {targetUnstuckPosition} over {journeyDuration}s.");
-
-        while (elapsedTime < journeyDuration)
-        {
-            Vector3 currentLerpPos = Vector3.Lerp(startPosition, targetUnstuckPosition, elapsedTime / journeyDuration);
-            if (rb != null)
-            {
-                rb.MovePosition(currentLerpPos);
-            }
-            else
-            {
-                transform.position = currentLerpPos;
-            }
-            networkPosition.Value = rb != null ? rb.position : transform.position;
-            elapsedTime += Time.deltaTime;
-            yield return null;
-        }
-
-        // Ensure final position is set
-        Vector3 finalPos = rb != null ? rb.position : transform.position; // Use actual final position after MovePosition attempts
-        if (Vector3.Distance(finalPos, targetUnstuckPosition) > 0.05f) { // If not quite there, snap
-             if (rb != null) rb.MovePosition(targetUnstuckPosition); else transform.position = targetUnstuckPosition;
-             networkPosition.Value = targetUnstuckPosition;
-        }
-
-        Debug.Log($"[NPC_UNSTICKING] '{gameObject.name}' finished unstuck movement. Picking new destination.");
-        PickNewDestination(); 
-        
-        // Reset flags after picking new destination and allowing one frame for MovementRoutine to potentially start
-        yield return null; 
-        serverIsUnsticking = false;
-        activeUnstuckingCoroutine = null;
-        // networkIsMoving.Value will be controlled by MovementRoutine now
-    }
-
-    // Make sprites face the camera (billboard effect) while maintaining correct movement direction
-    private void MakeSpritesFaceCamera()
-    {
-        SpriteRenderer spriteR = npcRenderer as SpriteRenderer;
-        if (spriteR != null && spriteR.transform != null && Camera.main != null)
-        {
-            // Make the sprite face the camera (billboard effect)
-            spriteR.transform.rotation = Quaternion.LookRotation(Camera.main.transform.forward);
+            Vector3 worldMovementDirection = agent.velocity.normalized;
             
-            // If the NPC is moving, update flipX based on movement direction relative to camera view
-            if (networkIsMoving.Value && IsServer)
+            // Flip sprite based on world X-component of movement direction
+            if (Mathf.Abs(worldMovementDirection.x) > 0.01f) 
             {
-                // Calculate movement direction in world space
-                Vector3 movementDir = Vector3.zero;
-                if (!inGroup)
-                {
-                    // Regular movement - direction is toward destination
-                    movementDir = (currentDestination - transform.position).normalized;
-                }
-                else
-                {
-                    // Group movement - direction is toward formation position
-                    movementDir = (formationTargetPos - transform.position).normalized;
-                }
-                
-                // Project movement direction onto camera's right vector to determine if moving left or right relative to camera view
-                float movementDot = Vector3.Dot(movementDir, Camera.main.transform.right);
-                
-                // Update flipX based on relative movement direction
-                if (Mathf.Abs(movementDot) > 0.01f) // Only update if there's significant horizontal movement
-                {
-                    networkSpriteFlipX.Value = (movementDot < 0); // Flip if moving left relative to camera
-                }
+                networkSpriteFlipX.Value = (worldMovementDirection.x < 0);
             }
+            // If worldMovementDirection.x is close to 0 (e.g., moving mostly along Z world axis),
+            // the flip state remains as it was. This prevents jitter when moving purely vertically on screen if desired.
         }
+        // If not moving, the flip state from the last movement is preserved. 
+        // You could add logic here for a default facing direction when idle if needed.
+    }
+
+    public override void OnNetworkDespawn()
+    {
+        if (!IsServer)
+        {
+            networkPosition.OnValueChanged -= ClientOnPositionChanged;
+            networkIsMoving.OnValueChanged -= ClientOnIsMovingChanged;
+            networkAgentDestination.OnValueChanged -= ClientOnAgentDestinationChanged;
+            // No networkSpriteFlipX OnValueChanged to remove as it wasn't added
+        }
+        base.OnNetworkDespawn();
     }
 } 
