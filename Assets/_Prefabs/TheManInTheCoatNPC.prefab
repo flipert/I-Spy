@@ -212,6 +212,8 @@ MonoBehaviour:
   maxGroupTime: 25
   minGroupSize: 3
   maxGroupSize: 5
+  baseLeaveChancePerSecond: 0.02
+  leaveChanceIncreaseRatePerSecond: 0.01
   tintColors:
   - {r: 1, g: 0.11792451, b: 0.11792451, a: 1}
   - {r: 0.51808506, g: 1, b: 0.11764705, a: 1}
@@ -231,6 +233,7 @@ MonoBehaviour:
     m_Bits: 392
   unstuckMoveDistance: 1
   unstuckMoveSpeed: 1.5
+  npcClearanceRadius: 0.5
 --- !u!54 &5579437178170355664
 Rigidbody:
   m_ObjectHideFlags: 0

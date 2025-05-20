@@ -11,8 +11,12 @@ public class NPCSpawner : MonoBehaviour
 public GameObject[] npcPrefabs;
 [Tooltip("Maximum number of NPCs to spawn at game start.")]
 public int maxNPCCount = 10;
-[Tooltip("The maximum distance to search for a valid NavMesh point when spawning NPCs. Adjust this based on your NavMesh density and map size.")]
-public float navMeshSampleDistance = 1000f; // Increased default for larger maps
+[Tooltip("The center of the area where NPCs should attempt to spawn.")]
+public Vector3 spawnAreaCenter = Vector3.zero;
+[Tooltip("The size of the area (X and Z) where NPCs should attempt to spawn.")]
+public Vector3 spawnAreaSize = new Vector3(50f, 0, 50f);
+[Tooltip("The maximum distance to search for a valid NavMesh point from a randomly selected point within the spawn area. Keep this relatively small.")]
+public float navMeshSampleRadius = 5f; 
 
 [Header("Obstacle Avoidance Settings")]
 [Tooltip("Minimum distance an NPC should spawn away from any colliders on the obstacle layer.")]
@@ -95,17 +99,21 @@ Debug.Log("NPCSpawner: Finished spawning NPCs.");
 
 private Vector3 GetRandomNavMeshPoint()
 {
-    const int maxAttempts = 20; // Increased attempts to find a clear spot
+    const int maxAttempts = 50; 
     for (int attempt = 0; attempt < maxAttempts; attempt++)
     {
-        Vector3 randomDirection = Random.insideUnitSphere * navMeshSampleDistance;
-        randomDirection += transform.position;
+        // 1. Pick a random point within the spawner's defined spawnArea
+        Vector3 randomPointInSpawnArea = spawnAreaCenter + new Vector3(
+            Random.Range(-spawnAreaSize.x / 2f, spawnAreaSize.x / 2f),
+            0, // Assuming Y is determined by NavMesh or terrain height
+            Random.Range(-spawnAreaSize.z / 2f, spawnAreaSize.z / 2f)
+        );
 
         NavMeshHit navHit;
-        if (NavMesh.SamplePosition(randomDirection, out navHit, navMeshSampleDistance, NavMesh.AllAreas))
+        // 2. Find the closest NavMesh point to this randomPointInSpawnArea
+        if (NavMesh.SamplePosition(randomPointInSpawnArea, out navHit, navMeshSampleRadius, NavMesh.AllAreas))
         {
             // Check if the found point is too close to any obstacles
-            // Ensure obstacleLayerMask is assigned in the inspector, otherwise this check might not work as intended.
             if (obstacleLayerMask.value == 0) // LayerMask not set, behave as before or warn
             {
                  Debug.LogWarning("NPCSpawner: Obstacle Layer Mask is not set in the Inspector. Spawning without obstacle avoidance check.");
@@ -122,7 +130,7 @@ private Vector3 GetRandomNavMeshPoint()
         // else, NavMesh.SamplePosition failed to find a point on the NavMesh, try again
     }
 
-    Debug.LogWarning($"NPCSpawner: Failed to find a random point on the NavMesh clear of obstacles on specified layers after {maxAttempts} attempts. Returning Vector3.zero. Check NavMesh baking and obstacleLayerMask settings.");
+    Debug.LogWarning($"NPCSpawner: Failed to find a random point on the NavMesh clear of obstacles on specified layers within the defined spawn area after {maxAttempts} attempts. Returning Vector3.zero. Check NavMesh baking, obstacleLayerMask, spawnArea settings, and navMeshSampleRadius.");
     return Vector3.zero; // Return zero vector if no suitable point is found
 }
 
@@ -171,5 +179,12 @@ if (npcPrefabs[randomIndex] == null)
 }
     
 return npcPrefabs[randomIndex];
+}
+
+// Visualize the spawn area in the editor
+private void OnDrawGizmosSelected()
+{
+    Gizmos.color = Color.cyan;
+    Gizmos.DrawWireCube(spawnAreaCenter, spawnAreaSize);
 }
 }
