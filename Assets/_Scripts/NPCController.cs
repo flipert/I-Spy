@@ -19,8 +19,8 @@ public class NPCController : NetworkBehaviour
     public float moveSpeed = 3.5f; // Default speed
     [Tooltip("The angular speed for turning (degrees/second). Lower values mean smoother turns.")]
     public float angularSpeed = 120f; // Default angular speed
-    [Tooltip("The acceleration of the NPC. High value for quick speed changes up to max speed.")]
-    public float acceleration = 100f; // High acceleration for responsive start/stop
+    [Tooltip("The acceleration of the NPC. Set very high for effectively instant speed changes.")]
+    public float acceleration = 10000f; // Very high acceleration for virtually no ramp-up time
 
     [Header("Animation")]
     [Tooltip("Animator component from the NPC prefab. Expecting a 'Running' boolean parameter.")]
@@ -193,15 +193,6 @@ public class NPCController : NetworkBehaviour
                     }
                 }
             }
-
-            // Client-side billboarding and applying network flip
-            if (characterSpriteRenderer != null && Camera.main != null) // Use characterSpriteRenderer
-            {
-                // Billboarding: Make sprite face the camera plane, keeping world up as sprite's up
-                characterSpriteRenderer.transform.rotation = Quaternion.LookRotation(Camera.main.transform.forward, Vector3.up);
-                // Apply synced flip
-                characterSpriteRenderer.flipX = networkSpriteFlipX.Value;
-            }
         }
         else // Client-side smoothing and animation
         {
@@ -214,6 +205,15 @@ public class NPCController : NetworkBehaviour
                 transform.position = Vector3.Lerp(transform.position, networkPosition.Value, Time.deltaTime * 10f);
             }
             // Animation is updated via OnValueChanged callback
+        }
+
+        // This part should run for any client (including host as client) that renders the NPC
+        if (characterSpriteRenderer != null && Camera.main != null)
+        {
+            // Billboarding: Make sprite face the camera plane, keeping world up as sprite's up
+            characterSpriteRenderer.transform.rotation = Quaternion.LookRotation(Camera.main.transform.forward, Vector3.up);
+            // Apply synced flip
+            characterSpriteRenderer.flipX = networkSpriteFlipX.Value;
         }
     }
 
@@ -259,6 +259,7 @@ public class NPCController : NetworkBehaviour
                 networkAgentDestination.Value = randomNavMeshPoint;
                 networkIsMoving.Value = true;
                 if (npcAnimator != null) npcAnimator.SetBool("Running", true);
+                ServerHandleSpriteOrientation(); // Ensure correct orientation immediately upon starting to run
             }
             else
             {
@@ -299,20 +300,33 @@ public class NPCController : NetworkBehaviour
     {
         if (!IsServer) return; 
 
-        if (networkIsMoving.Value && agent != null && agent.velocity.sqrMagnitude > 0.01f) 
+        // Ensure agent is valid, has a path, and is actually trying to move.
+        // networkIsMoving.Value is checked to ensure we only try to flip if the NPC is in a "moving" state.
+        if (networkIsMoving.Value && agent != null && agent.hasPath && agent.desiredVelocity.sqrMagnitude > 0.01f) 
         {
-            Vector3 worldMovementDirection = agent.velocity.normalized;
+            // Use desiredVelocity for a more stable direction based on the path.
+            Vector3 desiredMoveDirection = agent.desiredVelocity.normalized;
+            float xMovement = desiredMoveDirection.x;
             
-            // Flip sprite based on world X-component of movement direction
-            if (Mathf.Abs(worldMovementDirection.x) > 0.01f) 
+            // Threshold for how much x-component is needed to be considered "moving left/right".
+            // If x-component of desired movement is less than this, flip state is preserved.
+            // This prevents jitter if moving mostly along Z-axis (relative to world) or if x-movement is very slight.
+            float flipThreshold = 0.15f; 
+
+            if (xMovement > flipThreshold) // Desired movement is noticeably to the "world right"
             {
-                networkSpriteFlipX.Value = (worldMovementDirection.x < 0);
+                // Only update if the state needs to change
+                if (networkSpriteFlipX.Value) networkSpriteFlipX.Value = false;
             }
-            // If worldMovementDirection.x is close to 0 (e.g., moving mostly along Z world axis),
-            // the flip state remains as it was. This prevents jitter when moving purely vertically on screen if desired.
+            else if (xMovement < -flipThreshold) // Desired movement is noticeably to the "world left"
+            {
+                // Only update if the state needs to change
+                if (!networkSpriteFlipX.Value) networkSpriteFlipX.Value = true;
+            }
+            // If xMovement is between -flipThreshold and flipThreshold, the current flip state is maintained.
         }
-        // If not moving, the flip state from the last movement is preserved. 
-        // You could add logic here for a default facing direction when idle if needed.
+        // If not actively moving as per networkIsMoving, or no path, or desiredVelocity is negligible, 
+        // the flip state (networkSpriteFlipX.Value) is preserved from its last state.
     }
 
     public override void OnNetworkDespawn()
