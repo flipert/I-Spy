@@ -22,6 +22,10 @@ public class NPCController : NetworkBehaviour
     [Tooltip("The acceleration of the NPC. Set very high for effectively instant speed changes.")]
     public float acceleration = 10000f; // Very high acceleration for virtually no ramp-up time
 
+    [Header("Pathfinding Settings")]
+    [Tooltip("If true, NavMeshAgent-level obstacle avoidance will be disabled, allowing NPCs to pass through each other.")]
+    public bool disableAgentObstacleAvoidance = true;
+
     [Header("Animation")]
     [Tooltip("Animator component from the NPC prefab. Expecting a 'Running' boolean parameter.")]
     public Animator npcAnimator;
@@ -68,6 +72,15 @@ public class NPCController : NetworkBehaviour
                 agent.speed = moveSpeed;
                 agent.angularSpeed = angularSpeed;
                 agent.acceleration = acceleration;
+                if (disableAgentObstacleAvoidance)
+                {
+                    agent.obstacleAvoidanceType = ObstacleAvoidanceType.NoObstacleAvoidance;
+                }
+                else
+                {
+                    // Optionally, set a default avoidance type if you re-enable it
+                    agent.obstacleAvoidanceType = ObstacleAvoidanceType.HighQualityObstacleAvoidance; 
+                }
             }
         }
 
@@ -105,6 +118,14 @@ public class NPCController : NetworkBehaviour
                 agent.speed = moveSpeed;
                 agent.angularSpeed = angularSpeed;
                 agent.acceleration = acceleration;
+                if (disableAgentObstacleAvoidance && IsServer) // Ensure this is also applied here for server
+                {
+                    agent.obstacleAvoidanceType = ObstacleAvoidanceType.NoObstacleAvoidance;
+                }
+                else if (IsServer)
+                {
+                    agent.obstacleAvoidanceType = ObstacleAvoidanceType.HighQualityObstacleAvoidance;
+                }
             }
             DecideNextState();
         }
