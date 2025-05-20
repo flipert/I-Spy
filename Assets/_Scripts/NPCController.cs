@@ -51,8 +51,6 @@ public class NPCController : NetworkBehaviour
         
     // Internal State
     private NavMeshAgent agent;
-    private float currentStateTimer;
-    private bool serverIsRunningState;
 
     // Define pastel colors
     private static readonly Color[] pastelColors = new Color[]
@@ -187,7 +185,7 @@ public class NPCController : NetworkBehaviour
             networkSpriteColor.Value = initialColor;
             if(characterSpriteRenderer != null) characterSpriteRenderer.color = initialColor; // Also apply on server for host
 
-            DecideNextState();
+            Server_ForceIdle(); // Start idle until NPCBehaviorManager issues a command.
         }
     }
 
@@ -267,24 +265,24 @@ public class NPCController : NetworkBehaviour
     {
         if (IsServer)
         {
-            currentStateTimer -= Time.deltaTime;
-            if (currentStateTimer <= 0)
-            {
-                DecideNextState();
-            }
-
             networkPosition.Value = transform.position;
             ServerUpdateMovementDirection(); // Server updates movement direction for clients
 
-            if (serverIsRunningState && agent != null && !agent.pathPending)
+            // This check is for autonomously stopping if it reaches a target.
+            // NPCBehaviorManager will generally control how long it "tries" to run towards a target.
+            if (networkIsMoving.Value && agent != null && !agent.pathPending)
             {
                 if (agent.remainingDistance <= agent.stoppingDistance)
                 {
                     if (!agent.hasPath || agent.velocity.sqrMagnitude == 0f)
                     {
-                        // Reached destination early
-                        currentStateTimer = 0; // Force state change
-                        // Debug.Log($"NPC {gameObject.name} reached destination early, switching state.");
+                        // Reached destination. NPCBehaviorManager might issue a new command or this NPC will wait.
+                        // For now, we can make it stop moving and let NPCBehaviorManager decide the next high-level action.
+                        // Server_ForceIdle(); // Optionally, tell it to become idle. Or let BehaviorManager handle the next transition.
+                        // For now, let NPCBehaviorManager's timer decide when to switch.
+                        // This simply means it physically can't move further along this path.
+                        // Setting networkIsMoving to false here might be too abrupt if BehaviorManager expects it to be "wandering" for a set time.
+                        // Let's let ServerUpdateMovementDirection handle networkIsMoving based on actual agent velocity.
                     }
                 }
             }
@@ -335,76 +333,6 @@ public class NPCController : NetworkBehaviour
         }
     }
 
-    private void DecideNextState()
-    {
-        if (!IsServer) return;
-
-        if (serverIsRunningState) // Was running, now idle
-        {
-            TransitionToIdle();
-        }
-        else // Was idle, now run
-        {
-            TransitionToRunning();
-        }
-    }
-
-    private void TransitionToIdle()
-    {
-        if (!IsServer) return;
-
-        // Debug.Log($"NPC {gameObject.name} transitioning to IDLE.");
-        serverIsRunningState = false;
-        if (agent != null && agent.isOnNavMesh) agent.isStopped = true;
-        networkIsMoving.Value = false;
-        if (npcAnimator != null) npcAnimator.SetBool("Running", false);
-        currentStateTimer = Random.Range(1f, maxIdleTime);
-        networkAgentDesiredVelocity.Value = Vector3.zero; // NPC is idle, no desired velocity
-        networkAgentDestination.OnValueChanged -= ClientOnAgentDestinationChanged;
-        if(networkSpriteColor != null) networkSpriteColor.OnValueChanged -= ClientOnSpriteColorChanged;
-    }
-
-    private void TransitionToRunning()
-    {
-        if (!IsServer) return;
-
-        // Debug.Log($"NPC {gameObject.name} transitioning to RUNNING.");
-        serverIsRunningState = true;
-        if (agent != null && agent.isOnNavMesh)
-        {
-            Vector3 randomNavMeshPoint = PickRandomNavMeshLocation(wanderRadius);
-            if (randomNavMeshPoint != Vector3.zero) // Vector3.zero indicates failure to find point
-            {
-                agent.SetDestination(randomNavMeshPoint);
-                agent.isStopped = false;
-                networkAgentDestination.Value = randomNavMeshPoint;
-                networkIsMoving.Value = true;
-                if (npcAnimator != null) npcAnimator.SetBool("Running", true);
-                // ServerHandleSpriteOrientation(); // Ensure correct orientation immediately upon starting to run
-                // ServerUpdateMovementDirection will pick this up in the next server Update
-            }
-            else
-            {
-                // Failed to find a point, stay idle for a bit longer
-                // Debug.LogWarning($"NPC {gameObject.name} failed to find a NavMesh point. Staying idle.");
-                serverIsRunningState = false; // Revert to idle state logic for this cycle
-                networkIsMoving.Value = false;
-                if (npcAnimator != null) npcAnimator.SetBool("Running", false);
-                // currentStateTimer will be positive from previous idle, or we can set a short one
-                currentStateTimer = Random.Range(1f, maxIdleTime / 2f); // shorter idle if failed to run
-                return; // Skip setting full run timer
-            }
-        }
-        else
-        {
-             // Agent not ready, go back to idle for safety
-            // Debug.LogWarning($"NPC {gameObject.name} NavMeshAgent not ready. Staying idle.");
-            TransitionToIdle(); // Try to idle instead
-                    return;
-        }
-        currentStateTimer = Random.Range(1f, maxRunTime);
-    }
-
     private Vector3 PickRandomNavMeshLocation(float radius)
     {
         Vector3 randomDirection = Random.insideUnitSphere * radius;
@@ -422,9 +350,10 @@ public class NPCController : NetworkBehaviour
     {
         if (!IsServer) return; 
 
-        if (networkIsMoving.Value && agent != null && agent.hasPath && agent.desiredVelocity.sqrMagnitude > 0.01f) 
+        if (agent != null && agent.hasPath && agent.desiredVelocity.sqrMagnitude > 0.01f && !agent.isStopped) 
         {
             networkAgentDesiredVelocity.Value = agent.desiredVelocity.normalized;
+            if (!networkIsMoving.Value) networkIsMoving.Value = true; // Ensure this is set if moving
         }
         else
         {
@@ -434,8 +363,92 @@ public class NPCController : NetworkBehaviour
             {
                 networkAgentDesiredVelocity.Value = Vector3.zero;
             }
+            if (networkIsMoving.Value) networkIsMoving.Value = false; // Ensure this is unset if not moving
         }
     }
+
+    // --- Public methods for NPCBehaviorManager to call (SERVER-SIDE) ---
+    public void Server_ForceIdle()
+    {
+        if (!IsServer || agent == null || !agent.isOnNavMesh) return;
+
+        agent.isStopped = true;
+        agent.ResetPath(); // Clear any existing path
+        networkIsMoving.Value = false;
+        // networkAgentDesiredVelocity is handled by ServerUpdateMovementDirection which will see isStopped
+        if (npcAnimator != null) npcAnimator.SetBool("Running", false);
+        // Debug.Log($"NPC {gameObject.name} was forced to IDLE by BehaviorManager.");
+    }
+
+    public void Server_StartWandering()
+    {
+        if (!IsServer || agent == null || !agent.isOnNavMesh) return;
+
+        Vector3 randomNavMeshPoint = PickRandomNavMeshLocation(wanderRadius);
+        if (randomNavMeshPoint != Vector3.zero)
+        {
+            agent.SetDestination(randomNavMeshPoint);
+            agent.isStopped = false;
+            networkAgentDestination.Value = randomNavMeshPoint;
+            networkIsMoving.Value = true; // Will be confirmed by ServerUpdateMovementDirection based on velocity
+            if (npcAnimator != null) npcAnimator.SetBool("Running", true);
+            // Debug.Log($"NPC {gameObject.name} was commanded to WANDER by BehaviorManager to {randomNavMeshPoint}.");
+        }
+        else
+        {
+            // Failed to find a wander point, BehaviorManager might try again or switch state.
+            // For now, NPCController just reports failure by not moving.
+            // Consider forcing idle if wander fails and NPCBehaviorManager doesn't immediately give a new task.
+            Server_ForceIdle(); // Fallback to idle if cannot wander
+            // Debug.LogWarning($"NPC {gameObject.name} (WANDER command) failed to find NavMesh point. Forcing Idle.");
+        }
+    }
+
+    public void Server_MoveToTarget(Vector3 targetPosition)
+    {
+        if (!IsServer || agent == null || !agent.isOnNavMesh) return;
+
+        if (NavMesh.SamplePosition(targetPosition, out NavMeshHit hit, 1.0f, NavMesh.AllAreas)) // Check if target is on/near navmesh
+        {
+            agent.SetDestination(hit.position);
+            agent.isStopped = false;
+            networkAgentDestination.Value = hit.position;
+            networkIsMoving.Value = true; // Will be confirmed by ServerUpdateMovementDirection
+            if (npcAnimator != null) npcAnimator.SetBool("Running", true);
+            // Debug.Log($"NPC {gameObject.name} was commanded to MOVE by BehaviorManager to {hit.position}.");
+        }
+        else
+        {
+            // Target is not valid or not reachable
+            Server_ForceIdle(); // Fallback to idle
+            // Debug.LogWarning($"NPC {gameObject.name} (MOVE command) target {targetPosition} is not on NavMesh. Forcing Idle.");
+        }
+    }
+    
+    // Placeholder for group following behavior
+    // public void Server_FollowTarget(Transform targetToFollow, Vector3 offset)
+    // {
+    // if (!IsServer || agent == null || !agent.isOnNavMesh || targetToFollow == null) return;
+    // This would require continuous updates in NPCController's Update or a coroutine on the server
+    // For simplicity with BehaviorManager, it might be better if BehaviorManager periodically calls Server_MoveToTarget
+    // with updated positions from the followed target.
+    // Or, this method could start a coroutine here.
+    // agent.isStopped = false;
+    // networkIsMoving.Value = true;
+    // if (npcAnimator != null) npcAnimator.SetBool("Running", true);
+    // Add logic to continuously update destination: agent.SetDestination(targetToFollow.position + offset);
+    // Debug.Log($"NPC {gameObject.name} was commanded to FOLLOW {targetToFollow.name} by BehaviorManager.");
+    // }
+
+    public bool IsPathfindingComplete()
+    {
+        if (!IsServer || agent == null) return true; // If no agent, or not server, assume complete or not applicable.
+        if (agent.pathPending) return false; // Still calculating path
+        if (agent.remainingDistance > agent.stoppingDistance) return false; // Still has distance to cover
+        if (agent.hasPath && agent.velocity.sqrMagnitude > 0.01f) return false; // Still moving
+        return true; // Path is complete or NPC is stopped
+    }
+
 
     public override void OnNetworkDespawn()
     {
