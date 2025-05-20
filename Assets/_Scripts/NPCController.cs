@@ -39,7 +39,7 @@ public class NPCController : NetworkBehaviour
         NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
     private NetworkVariable<bool> networkIsMoving = new NetworkVariable<bool>(false,
         NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
-    private NetworkVariable<bool> networkSpriteFlipX = new NetworkVariable<bool>(false, // For sprite orientation
+    private NetworkVariable<Vector3> networkAgentDesiredVelocity = new NetworkVariable<Vector3>(Vector3.zero, // For client-side flip logic
         NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
         
     // Internal State
@@ -106,6 +106,7 @@ public class NPCController : NetworkBehaviour
             networkIsMoving.OnValueChanged += ClientOnIsMovingChanged;
             networkAgentDestination.OnValueChanged += ClientOnAgentDestinationChanged;
             // No specific OnValueChanged for networkSpriteFlipX, clients read it in Update
+            // No OnValueChanged needed for networkAgentDesiredVelocity, client reads in Update
 
             ApplyCurrentNetworkState();
         }
@@ -200,7 +201,7 @@ public class NPCController : NetworkBehaviour
             }
 
             networkPosition.Value = transform.position;
-            ServerHandleSpriteOrientation(); // Server decides flip
+            ServerUpdateMovementDirection(); // Server updates movement direction for clients
 
             if (serverIsRunningState && agent != null && !agent.pathPending)
             {
@@ -234,7 +235,30 @@ public class NPCController : NetworkBehaviour
             // Billboarding: Make sprite face the camera plane, keeping world up as sprite's up
             characterSpriteRenderer.transform.rotation = Quaternion.LookRotation(Camera.main.transform.forward, Vector3.up);
             // Apply synced flip
-            characterSpriteRenderer.flipX = networkSpriteFlipX.Value;
+            // characterSpriteRenderer.flipX = networkSpriteFlipX.Value;
+
+            // Client-side sprite flip based on networked desired velocity and camera orientation
+            Vector3 currentWorldDesiredVelocity = networkAgentDesiredVelocity.Value;
+            if (currentWorldDesiredVelocity.sqrMagnitude > 0.001f) // Check if there's any movement intention
+            {
+                Camera cam = Camera.main;
+                // Transform the world-space desired velocity into the camera's local space
+                Vector3 cameraSpaceVelocity = cam.transform.InverseTransformDirection(currentWorldDesiredVelocity);
+
+                // Use a threshold for flipping to prevent jitter when movement is near-vertical on screen
+                float clientFlipThreshold = 0.1f; 
+
+                if (cameraSpaceVelocity.x > clientFlipThreshold) // Moving right relative to camera
+                {
+                    characterSpriteRenderer.flipX = false;
+                }
+                else if (cameraSpaceVelocity.x < -clientFlipThreshold) // Moving left relative to camera
+                {
+                    characterSpriteRenderer.flipX = true;
+                }
+                // If cameraSpaceVelocity.x is within the threshold, current flipX is maintained to avoid jitter.
+            }
+            // If not moving (currentWorldDesiredVelocity is zero), the sprite's flipX remains as it was.
         }
     }
 
@@ -262,6 +286,7 @@ public class NPCController : NetworkBehaviour
         networkIsMoving.Value = false;
         if (npcAnimator != null) npcAnimator.SetBool("Running", false);
         currentStateTimer = Random.Range(1f, maxIdleTime);
+        networkAgentDesiredVelocity.Value = Vector3.zero; // NPC is idle, no desired velocity
     }
 
     private void TransitionToRunning()
@@ -280,7 +305,8 @@ public class NPCController : NetworkBehaviour
                 networkAgentDestination.Value = randomNavMeshPoint;
                 networkIsMoving.Value = true;
                 if (npcAnimator != null) npcAnimator.SetBool("Running", true);
-                ServerHandleSpriteOrientation(); // Ensure correct orientation immediately upon starting to run
+                // ServerHandleSpriteOrientation(); // Ensure correct orientation immediately upon starting to run
+                // ServerUpdateMovementDirection will pick this up in the next server Update
             }
             else
             {
@@ -317,37 +343,23 @@ public class NPCController : NetworkBehaviour
         return Vector3.zero; // Indicate failure
     }
 
-    private void ServerHandleSpriteOrientation()
+    private void ServerUpdateMovementDirection() // New method name and logic
     {
         if (!IsServer) return; 
 
-        // Ensure agent is valid, has a path, and is actually trying to move.
-        // networkIsMoving.Value is checked to ensure we only try to flip if the NPC is in a "moving" state.
         if (networkIsMoving.Value && agent != null && agent.hasPath && agent.desiredVelocity.sqrMagnitude > 0.01f) 
         {
-            // Use desiredVelocity for a more stable direction based on the path.
-            Vector3 desiredMoveDirection = agent.desiredVelocity.normalized;
-            float xMovement = desiredMoveDirection.x;
-            
-            // Threshold for how much x-component is needed to be considered "moving left/right".
-            // If x-component of desired movement is less than this, flip state is preserved.
-            // This prevents jitter if moving mostly along Z-axis (relative to world) or if x-movement is very slight.
-            float flipThreshold = 0.15f; 
-
-            if (xMovement > flipThreshold) // Desired movement is noticeably to the "world right"
-            {
-                // Only update if the state needs to change
-                if (networkSpriteFlipX.Value) networkSpriteFlipX.Value = false;
-            }
-            else if (xMovement < -flipThreshold) // Desired movement is noticeably to the "world left"
-            {
-                // Only update if the state needs to change
-                if (!networkSpriteFlipX.Value) networkSpriteFlipX.Value = true;
-            }
-            // If xMovement is between -flipThreshold and flipThreshold, the current flip state is maintained.
+            networkAgentDesiredVelocity.Value = agent.desiredVelocity.normalized;
         }
-        // If not actively moving as per networkIsMoving, or no path, or desiredVelocity is negligible, 
-        // the flip state (networkSpriteFlipX.Value) is preserved from its last state.
+        else
+        {
+            // If not moving, or no path, or desiredVelocity is negligible, 
+            // set networked desired velocity to zero so clients know.
+            if (networkAgentDesiredVelocity.Value != Vector3.zero)
+            {
+                networkAgentDesiredVelocity.Value = Vector3.zero;
+            }
+        }
     }
 
     public override void OnNetworkDespawn()
@@ -358,6 +370,7 @@ public class NPCController : NetworkBehaviour
             networkIsMoving.OnValueChanged -= ClientOnIsMovingChanged;
             networkAgentDestination.OnValueChanged -= ClientOnAgentDestinationChanged;
             // No networkSpriteFlipX OnValueChanged to remove as it wasn't added
+            // No OnValueChanged for networkAgentDesiredVelocity
         }
         base.OnNetworkDespawn();
     }
