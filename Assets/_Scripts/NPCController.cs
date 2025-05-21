@@ -37,6 +37,10 @@ public class NPCController : NetworkBehaviour
     public Animator npcAnimator;
     private Rigidbody rb; // Moved Rigidbody declaration here
 
+    [Header("Kill Interaction")]
+    [Tooltip("The UI GameObject to show when player is in range to kill this NPC.")]
+    public GameObject killPromptIcon; // Assign your in-world canvas/icon here
+
     // Network Variables
     private NetworkVariable<Vector3> networkPosition = new NetworkVariable<Vector3>(Vector3.zero, 
         NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
@@ -47,6 +51,8 @@ public class NPCController : NetworkBehaviour
     private NetworkVariable<Vector3> networkAgentDesiredVelocity = new NetworkVariable<Vector3>(Vector3.zero, // For client-side flip logic
         NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
     private NetworkVariable<Color> networkSpriteColor = new NetworkVariable<Color>(Color.white, // For sprite tinting
+        NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
+    private NetworkVariable<bool> networkIsAlive = new NetworkVariable<bool>(true,
         NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
         
     // Internal State
@@ -71,8 +77,12 @@ public class NPCController : NetworkBehaviour
         {
             rb.isKinematic = true; 
         }
-        // NavMeshAgent is retrieved in OnNetworkSpawn or can be here too if preferred.
-        // For now, keeping agent retrieval in OnNetworkSpawn as it was.
+        agent = GetComponent<NavMeshAgent>(); // Initialize agent here too for early access if needed
+
+        if (killPromptIcon != null)
+        {
+            killPromptIcon.SetActive(false); // Ensure prompt is hidden initially
+        }
     }
 
     public override void OnNetworkSpawn()
@@ -148,6 +158,7 @@ public class NPCController : NetworkBehaviour
             networkAgentDestination.OnValueChanged += ClientOnAgentDestinationChanged;
             networkAgentDesiredVelocity.OnValueChanged += ClientOnAgentDesiredVelocityChanged;
             networkSpriteColor.OnValueChanged += ClientOnSpriteColorChanged;
+            networkIsAlive.OnValueChanged += ClientOnIsAliveChanged; // Client subscribes to liveness changes
 
             ApplyCurrentNetworkState();
         }
@@ -233,6 +244,15 @@ public class NPCController : NetworkBehaviour
         }
     }
 
+    private void ClientOnIsAliveChanged(bool previousValue, bool newValue)
+    {
+        if (!newValue) // If became not alive
+        {
+            HandleDeathVisuals();
+        }
+        // If it becomes alive again (e.g. respawn), handle that logic here if needed
+    }
+
     private void ApplyCurrentNetworkState()
     {
         if (rb != null && networkPosition.Value != Vector3.zero) // Check if Rigidbody exists and pos is valid
@@ -263,6 +283,22 @@ public class NPCController : NetworkBehaviour
 
     void Update()
     {
+        if (!networkIsAlive.Value) // If not alive, do nothing
+        {
+            // Optionally, ensure agent is stopped and animations are off if not handled by KillNPCClientRpc
+            if (agent != null && agent.enabled && !agent.isStopped)
+            {
+                agent.isStopped = true;
+                agent.ResetPath();
+            }
+            if (npcAnimator != null && npcAnimator.enabled)
+            {
+                npcAnimator.SetBool("Running", false); 
+                // Potentially disable animator: npcAnimator.enabled = false;
+            }
+            return;
+        }
+
         if (IsServer)
         {
             networkPosition.Value = transform.position;
@@ -449,6 +485,86 @@ public class NPCController : NetworkBehaviour
         return true; // Path is complete or NPC is stopped
     }
 
+    public void ShowKillPrompt(bool show)
+    {
+        if (killPromptIcon != null && networkIsAlive.Value) // Only show if alive
+        {
+            killPromptIcon.SetActive(show);
+        }
+        else if (killPromptIcon != null && !show) // Always allow hiding
+        {
+            killPromptIcon.SetActive(false);
+        }
+    }
+
+    private void HandleDeathVisuals()
+    {
+        if (npcAnimator != null)
+        {
+            // Assuming a "Die" trigger or state in the NPC's animator
+            npcAnimator.SetTrigger("Die"); 
+        }
+        ShowKillPrompt(false); // Ensure prompt is hidden
+
+        // Disable NavMeshAgent if it hasn't been already.
+        if (agent != null && agent.enabled)
+        {
+            agent.isStopped = true;
+            agent.ResetPath(); 
+            // agent.enabled = false; // Consider disabling agent fully
+        }
+        
+        // You might want to disable other components or start a despawn timer here
+        // For example, disable the NPCController script itself after a delay
+        // StartCoroutine(DespawnAfterAnimation(5f)); // Example
+    }
+
+    [ServerRpc(RequireOwnership = false)] // Player (any client) can request this
+    public void KillNPCServerRpc(ServerRpcParams rpcParams = default)
+    {
+        if (!networkIsAlive.Value) return; // Already dead
+
+        Debug.Log($"NPC {gameObject.name} received KillNPCServerRpc from client {rpcParams.Receive.SenderClientId}. Processing death.");
+        networkIsAlive.Value = false;
+
+        // Server-side logic for death:
+        // - Stop agent
+        if (agent != null && agent.enabled)
+        {
+            agent.isStopped = true;
+            agent.ResetPath();
+        }
+        // - Inform NPCBehaviorManager or other systems if necessary
+        NPCBehaviorManager behaviorManager = GetComponent<NPCBehaviorManager>();
+        if (behaviorManager != null)
+        {
+            // behaviorManager.NotifyOfDeath(); // Example: if manager needs to know
+        }
+
+        // The change to networkIsAlive will trigger ClientOnIsAliveChanged on all clients,
+        // which then calls HandleDeathVisuals which includes playing the animation.
+        // So, KillNPCClientRpc might not be strictly needed if animation is handled by networkIsAlive change.
+        // However, if there are other effects specific to the "kill" event (e.g. sound, particles)
+        // that should only play once when killed (and not on late join), a ClientRpc is better.
+        KillNPCClientRpc(); 
+    }
+
+    [ClientRpc]
+    private void KillNPCClientRpc()
+    {
+        // This ClientRpc is called on all clients by the server after server-side death logic is processed.
+        // networkIsAlive.OnValueChanged will also call HandleDeathVisuals.
+        // Use this RPC for one-shot effects that should happen immediately upon kill confirmation.
+        // If HandleDeathVisuals already covers animation, this might just be for sound/particles.
+        
+        Debug.Log($"NPC {gameObject.name} received KillNPCClientRpc. Playing death effects.");
+        // Example: Play death sound
+        // AudioManager.Instance.PlayDeathSoundAt(transform.position);
+
+        // If animations or other state changes are purely driven by networkIsAlive.OnValueChanged -> HandleDeathVisuals,
+        // this RPC might be redundant for those aspects. But it's good for immediate, one-shot effects.
+        // For now, HandleDeathVisuals handles the animation and hiding prompt.
+    }
 
     public override void OnNetworkDespawn()
     {
@@ -459,6 +575,7 @@ public class NPCController : NetworkBehaviour
             networkAgentDestination.OnValueChanged -= ClientOnAgentDestinationChanged;
             networkAgentDesiredVelocity.OnValueChanged -= ClientOnAgentDesiredVelocityChanged;
             networkSpriteColor.OnValueChanged -= ClientOnSpriteColorChanged;
+            networkIsAlive.OnValueChanged -= ClientOnIsAliveChanged; // Unsubscribe
             // No networkSpriteFlipX OnValueChanged to remove as it wasn't added
             // No OnValueChanged for networkAgentDesiredVelocity
         }

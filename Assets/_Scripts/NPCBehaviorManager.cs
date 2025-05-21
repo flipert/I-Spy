@@ -490,7 +490,12 @@ public class NPCBehaviorManager : NetworkBehaviour
             ServerActiveGroups.Remove(_server_currentGroupMembership);
         }
         _server_currentGroupMembership = null;
-        networkCurrentGroupId.Value = 0;
+        
+        // Only try to update NetworkVariable if the object is still fully spawned and not in the process of despawning.
+        if (NetworkObject != null && NetworkObject.IsSpawned)
+        {
+            networkCurrentGroupId.Value = 0;
+        }
     }
     
     private void Server_DisbandCurrentGroup() // Typically called by leader if forming fails
@@ -505,13 +510,20 @@ public class NPCBehaviorManager : NetworkBehaviour
             if (member != this) // Leader already knows
             {
                 member._server_currentGroupMembership = null;
-                member.networkCurrentGroupId.Value = 0;
+                if (member.NetworkObject != null && member.NetworkObject.IsSpawned)
+                {
+                    member.networkCurrentGroupId.Value = 0;
+                }
                 member.SetRandomNonGroupState(); // Make them do something else
             }
         }
         ServerActiveGroups.Remove(_server_currentGroupMembership);
         _server_currentGroupMembership = null;
-        networkCurrentGroupId.Value = 0;
+        // Leader also sets its own group ID to 0, if still spawned.
+        if (NetworkObject != null && NetworkObject.IsSpawned)
+        {
+            networkCurrentGroupId.Value = 0;
+        }
     }
 
     private void ExecuteCurrentBehaviorClient()
