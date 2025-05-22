@@ -601,13 +601,12 @@ public class NPCController : NetworkBehaviour
             Debug.LogError($"NPC {gameObject.name}: npcAnimator is NULL in HandleDeathVisuals. Cannot play death animation. Check NPC prefab Animator setup and OnNetworkSpawn.");
             if (IsServer) StartCoroutine(DespawnAfterDelay(2f));
             ShowKillPrompt(false);
-            // Attempt to stop/disable agent even if animator is null
             if (agent != null && agent.enabled)
             {
                 agent.isStopped = true;
                 agent.ResetPath();
-                agent.velocity = Vector3.zero; // Stop current movement
-                // agent.enabled = false; // Consider disabling if issues persist
+                agent.velocity = Vector3.zero; 
+                agent.enabled = false; // <--- AGGRESSIVELY DISABLE AGENT ON CLIENT
                 Debug.Log($"NPC {gameObject.name} (HandleDeathVisuals/NoAnimator): Agent stopped/disabled as fallback.");
             }
             return;
@@ -615,15 +614,13 @@ public class NPCController : NetworkBehaviour
 
         Debug.Log($"NPC {gameObject.name} triggering Die animation. Animator exists: {npcAnimator != null}. Is dead: {isDead}");
         
-        // Stop and disable NavMeshAgent to prevent movement during death animation on clients
         if (agent != null && agent.enabled)
         {
             agent.isStopped = true;
             agent.ResetPath();
-            agent.velocity = Vector3.zero; // Explicitly stop its current movement impulse
-            // agent.enabled = false; // This is a very effective way to stop it fully.
-                                     // If stopping alone isn't enough, uncommenting this is the next step.
-            Debug.Log($"NPC {gameObject.name} (HandleDeathVisuals): NavMeshAgent stopped, path reset, velocity zeroed.");
+            agent.velocity = Vector3.zero; 
+            agent.enabled = false; // <--- AGGRESSIVELY DISABLE AGENT ON CLIENT
+            Debug.Log($"NPC {gameObject.name} (HandleDeathVisuals): NavMeshAgent STOPPED and DISABLED.");
         }
 
         bool hasDieTrigger = false; 
@@ -698,18 +695,16 @@ public class NPCController : NetworkBehaviour
 
         Debug.Log($"NPC {gameObject.name} received KillNPCServerRpc from client {rpcParams.Receive.SenderClientId}. Setting networkIsAlive to false.");
         
-        // Stop agent movement immediately and definitively on the server
         if (agent != null && agent.enabled)
         {
-            agent.isStopped = true; // Stop current path execution
-            agent.ResetPath();      // Clear any path it was following
-            agent.velocity = Vector3.zero; // Explicitly stop its current movement impulse
-            // agent.enabled = false; // Disable the agent component to prevent any further updates from it. This is very effective.
-            // Let's try with just stopping and resetting velocity first. Disabling can be a stronger measure if needed.
-            Debug.Log($"NPC {gameObject.name} NavMeshAgent stopped, path reset, and velocity zeroed by server.");
+            agent.isStopped = true; 
+            agent.ResetPath();      
+            agent.velocity = Vector3.zero; 
+            agent.enabled = false; // <--- AGGRESSIVELY DISABLE AGENT ON SERVER
+            Debug.Log($"NPC {gameObject.name} NavMeshAgent STOPPED and DISABLED by server.");
         }
 
-        networkIsAlive.Value = false; // This will trigger ClientOnIsAliveChanged on all clients
+        networkIsAlive.Value = false; 
         
         ProcessDeathClientRpc(); 
     }
