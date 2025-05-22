@@ -78,6 +78,22 @@ public class PlayerController : NetworkBehaviour
 
     void Update()
     {
+        // If kill animation is playing, do nothing else for movement/input
+        if (PlayerKill.IsKillAnimationPlaying && IsOwner)
+        {
+            // Optionally, ensure player is not moving if caught mid-movement by animation start
+            if (rb != null) 
+            {
+                rb.velocity = Vector3.zero;
+                rb.angularVelocity = Vector3.zero;
+            }
+            if (animator != null) 
+            {
+                animator.SetBool("Running", false); // Ensure running animation is off
+            }
+            return; // Skip normal movement and input processing
+        }
+
         // Only process input for the local player
         if (IsOwner)
         {
