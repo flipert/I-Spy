@@ -242,8 +242,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d5a57f767e5e46a458fc5d3c628d0cbb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  GlobalObjectIdHash: 2294059672
-  InScenePlacedSourceGlobalObjectIdHash: 0
+  GlobalObjectIdHash: 3275172829
+  InScenePlacedSourceGlobalObjectIdHash: 677228901
   AlwaysReplicateAsRoot: 0
   SynchronizeTransform: 1
   ActiveSceneSynchronization: 0
@@ -331,11 +331,16 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c1ce118b7058248459335bce5c113da7, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  killRange: 2
+  killRange: 1
   npcLayerMask:
     serializedVersion: 2
     m_Bits: 1024
   killKey: 32
+  aimKey: 9
+  aimRange: 3
+  crosshairPrefab: {fileID: 8826991618030741413, guid: 54be190b4269e44bfbf8339397c28708, type: 3}
+  uiCanvas: {fileID: 0}
+  shootCooldown: 20
   playerAnimator: {fileID: 3879874863887253514}
 --- !u!1 &6451389695068673682
 GameObject:

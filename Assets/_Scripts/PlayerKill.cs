@@ -1,6 +1,7 @@
 using UnityEngine;
 using Unity.Netcode;
 using System.Collections;
+using UnityEngine.UI; // Required for UI elements
 
 public class PlayerKill : NetworkBehaviour
 {
@@ -8,6 +9,13 @@ public class PlayerKill : NetworkBehaviour
     [SerializeField] private float killRange = 2f;
     [SerializeField] private LayerMask npcLayerMask;
     [SerializeField] private KeyCode killKey = KeyCode.Space; // Default to space bar
+    
+    [Header("Ranged Kill Settings")]
+    [SerializeField] private KeyCode aimKey = KeyCode.Tab;
+    [SerializeField] private float aimRange = 10f; // Max distance for aim point calculation
+    [SerializeField] private GameObject crosshairPrefab; // Assign UI crosshair prefab in inspector
+    private Canvas uiCanvas;
+    [SerializeField] private float shootCooldown = 0.5f; // Time between shots
 
     [Header("References")]
     [SerializeField] private Animator playerAnimator; // Assign your player's animator
@@ -16,12 +24,23 @@ public class PlayerKill : NetworkBehaviour
     private Collider[] nearbyNPCs = new Collider[5]; // Pre-allocate for minor optimization
     private bool isPerformingKill = false; // To prevent kill spam
 
-    // Public flag for PlayerController to check
+    // Public flags for PlayerController to check
     public static bool IsKillAnimationPlaying { get; private set; } = false;
+    public static bool IsAiming { get; private set; } = false;
+
+    // Ranged kill variables
+    private GameObject crosshairInstance;
+    private bool isInAimMode = false;
+    private float lastShotTime = 0f;
+    
+    // The world position the crosshair represents, for raycasting
+    private Vector3 currentAimWorldPosition;
 
     void Start()
     {
         IsKillAnimationPlaying = false; // Ensure it's reset on start/spawn
+        IsAiming = false;
+        
         // Make sure we have the animator
         if (playerAnimator == null && IsOwner)
         {
@@ -29,6 +48,24 @@ public class PlayerKill : NetworkBehaviour
             if (playerAnimator == null)
             {
                 Debug.LogWarning("PlayerKill could not find an Animator component! Kill animations won't play.");
+            }
+        }
+        
+        // Try to find the UI Canvas by name if not assigned
+        if (uiCanvas == null && IsOwner)
+        {
+            GameObject canvasObject = GameObject.Find("Canvas"); // Find the Canvas by name
+            if (canvasObject != null)
+            {
+                uiCanvas = canvasObject.GetComponent<Canvas>();
+                if (uiCanvas == null)
+                {
+                    Debug.LogWarning("PlayerKill found GameObject named 'Canvas' but it lacks a Canvas component!");
+                }
+            }
+            else
+            {
+                Debug.LogWarning("PlayerKill could not find a GameObject named 'Canvas'! Crosshair functionality will be limited.");
             }
         }
         
@@ -40,8 +77,232 @@ public class PlayerKill : NetworkBehaviour
     {
         if (!IsOwner) return; // Only the owner player can initiate kills
 
-        FindTargetNPC();
-        HandleKillInput();
+        // Handle aim mode toggle
+        if (Input.GetKeyDown(aimKey) && !isPerformingKill)
+        {
+            ToggleAimMode();
+        }
+
+        // Handle aiming
+        if (isInAimMode)
+        {
+            UpdateCrosshairPosition();
+            
+            // Handle shooting
+            if (Input.GetMouseButtonDown(0) && Time.time - lastShotTime >= shootCooldown)
+            {
+                Shoot();
+            }
+            
+            // Cancel aim mode with right click or pressing aim key again
+            if (Input.GetMouseButtonDown(1))
+            {
+                ExitAimMode();
+            }
+        }
+        else
+        {
+            // Normal melee kill handling
+            FindTargetNPC();
+            HandleKillInput();
+        }
+    }
+
+    private void ToggleAimMode()
+    {
+        if (isInAimMode)
+        {
+            ExitAimMode();
+        }
+        else
+        {
+            EnterAimMode();
+        }
+    }
+
+    private void EnterAimMode()
+    {
+        isInAimMode = true;
+        IsAiming = true;
+        
+        // Hide melee kill prompt if any
+        if (currentTargetNPC != null)
+        {
+            currentTargetNPC.ShowKillPrompt(false);
+        }
+        
+        // Create crosshair
+        if (crosshairPrefab != null)
+        {
+            // Instantiate as a child of the UI Canvas
+            if (uiCanvas != null)
+            {
+                 crosshairInstance = Instantiate(crosshairPrefab, uiCanvas.transform);
+                 // Initial position doesn't matter much as it's updated immediately
+                 crosshairInstance.transform.localPosition = Vector3.zero;
+            }
+            else
+            {
+                Debug.LogWarning("PlayerKill: Cannot instantiate UI crosshair without a UI Canvas reference.");
+                 // Fallback to a simple 3D indicator if no canvas is found?
+                 // Or maybe just log error and don't show crosshair.
+                 // For now, let's just not create it if canvas is missing.
+            }
+        }
+        else
+        {
+            Debug.LogWarning("PlayerKill: No Crosshair Prefab assigned for ranged kill.");
+            // Don't create a default primitive sphere if we want UI crosshair
+        }
+        
+        // Set aiming animation
+        if (playerAnimator != null)
+        {
+            playerAnimator.SetBool("IsAiming", true);
+        }
+        
+        Debug.Log("Entered aim mode");
+    }
+
+    private void ExitAimMode()
+    {
+        isInAimMode = false;
+        IsAiming = false;
+        
+        // Destroy crosshair
+        if (crosshairInstance != null)
+        {
+            Destroy(crosshairInstance);
+        }
+        
+        // Stop aiming animation
+        if (playerAnimator != null)
+        {
+            playerAnimator.SetBool("IsAiming", false);
+        }
+        
+        Debug.Log("Exited aim mode");
+    }
+
+    private void UpdateCrosshairPosition()
+    {
+        if (crosshairInstance == null || Camera.main == null) return;
+        
+        // Calculate the world position the mouse is aiming at
+        Camera mainCamera = Camera.main;
+        Plane playerPlane = new Plane(Vector3.up, transform.position);
+        Ray ray = mainCamera.ScreenPointToRay(Input.mousePosition);
+        
+        float enter = 0f;
+        Vector3 targetWorldPosition = transform.position + Vector3.forward * aimRange; // Default if raycast misses
+
+        if (playerPlane.Raycast(ray, out enter))
+        {
+            Vector3 hitPoint = ray.GetPoint(enter);
+            Vector3 direction = (hitPoint - transform.position).normalized;
+            
+            // Keep the target position at a fixed distance from the player within the aimRange
+            targetWorldPosition = transform.position + direction * aimRange;
+            // Ensure the target position is at player's height + a small offset
+            targetWorldPosition.y = transform.position.y + 1f; 
+        }
+        
+        // Store the calculated world position for shooting
+        currentAimWorldPosition = targetWorldPosition;
+        
+        // Now, convert the world position to screen position to place the UI crosshair
+        Vector3 screenPosition = mainCamera.WorldToScreenPoint(targetWorldPosition);
+        
+        // Position the UI crosshair
+        // Assuming the UI crosshair prefab is a RectTransform and the canvas is set up correctly
+        if (crosshairInstance.transform is RectTransform)
+        {
+             RectTransform canvasRect = uiCanvas.GetComponent<RectTransform>();
+             Vector2 viewportPosition = mainCamera.WorldToViewportPoint(targetWorldPosition);
+             Vector2 canvasPosition = new Vector2(
+                 ((viewportPosition.x * canvasRect.sizeDelta.x) - (canvasRect.sizeDelta.x * 0.5f)),
+                 ((viewportPosition.y * canvasRect.sizeDelta.y) - (canvasRect.sizeDelta.y * 0.5f)));
+             
+             crosshairInstance.GetComponent<RectTransform>().anchoredPosition = canvasPosition;
+        }
+        else
+        {
+            // Fallback for non-RectTransform UI elements (less common)
+            // This might not position it correctly depending on UI setup
+            crosshairInstance.transform.position = screenPosition;
+        }
+
+        // Make player face the crosshair direction (based on the calculated world position)
+        Vector3 lookDirection = (currentAimWorldPosition - transform.position).normalized;
+        transform.rotation = Quaternion.LookRotation(new Vector3(lookDirection.x, 0, lookDirection.z));
+    }
+
+    private void Shoot()
+    {
+        lastShotTime = Time.time;
+        
+        // Trigger shooting animation
+        if (playerAnimator != null)
+        {
+            playerAnimator.SetTrigger("Shoot");
+        }
+        
+        // Check if crosshair is over an NPC
+        if (crosshairInstance != null)
+        {
+            // Cast a ray from the camera through the UI crosshair's screen position
+            Camera mainCamera = Camera.main;
+            if (mainCamera == null) return;
+
+            // Use the stored world position for the raycast origin and direction from player
+            Vector3 rayStart = transform.position + Vector3.up; // Start from player's chest height
+            Vector3 rayDirection = (currentAimWorldPosition - rayStart).normalized;
+            
+            RaycastHit hit;
+            if (Physics.Raycast(rayStart, rayDirection, out hit, aimRange, npcLayerMask))
+            {
+                NPCController npc = hit.collider.GetComponent<NPCController>();
+                if (npc != null)
+                {
+                    Debug.Log($"Shot hit NPC: {npc.name}");
+                    
+                    // Initiate kill on server
+                    InitiateRangedKillServerRpc(npc.NetworkObject);
+                    
+                    // Exit aim mode after successful shot
+                    ExitAimMode();
+                }
+            }
+            else
+            {
+                Debug.Log("Shot missed");
+            }
+        }
+    }
+
+    [ServerRpc(RequireOwnership = true)]
+    private void InitiateRangedKillServerRpc(NetworkObjectReference targetNpcRef)
+    {
+        if (targetNpcRef.TryGet(out NetworkObject targetNpcNetworkObject))
+        {
+            if (targetNpcNetworkObject.TryGetComponent<NPCController>(out NPCController npcToKill))
+            {
+                // Tell all clients to play shooting animation
+                PlayShootAnimationClientRpc();
+                
+                // Kill the NPC
+                npcToKill.KillNPCServerRpc();
+            }
+        }
+    }
+
+    [ClientRpc]
+    private void PlayShootAnimationClientRpc()
+    {
+        if (playerAnimator != null)
+        {
+            playerAnimator.SetTrigger("Shoot");
+        }
     }
 
     void FindTargetNPC()

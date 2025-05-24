@@ -78,20 +78,51 @@ public class PlayerController : NetworkBehaviour
 
     void Update()
     {
-        // If kill animation is playing, do nothing else for movement/input
-        if (PlayerKill.IsKillAnimationPlaying && IsOwner)
+        // If kill animation is playing OR if aiming, handle differently
+        if (IsOwner)
         {
-            // Optionally, ensure player is not moving if caught mid-movement by animation start
-            if (rb != null) 
+            if (PlayerKill.IsKillAnimationPlaying)
             {
-                rb.velocity = Vector3.zero;
-                rb.angularVelocity = Vector3.zero;
+                // Optionally, ensure player is not moving if caught mid-movement by animation start
+                if (rb != null) 
+                {
+                    rb.velocity = Vector3.zero;
+                    rb.angularVelocity = Vector3.zero;
+                }
+                if (animator != null) 
+                {
+                    animator.SetBool("Running", false); // Ensure running animation is off
+                }
+                return; // Skip normal movement and input processing
             }
-            if (animator != null) 
+            
+            // Check if player is aiming
+            if (PlayerKill.IsAiming)
             {
-                animator.SetBool("Running", false); // Ensure running animation is off
+                // Root player in place
+                if (rb != null) 
+                {
+                    rb.velocity = Vector3.zero;
+                    rb.angularVelocity = Vector3.zero;
+                }
+                if (animator != null) 
+                {
+                    animator.SetBool("Running", false);
+                }
+                
+                // Still update network position so other clients see us stopped
+                if (IsServer)
+                {
+                    networkPosition.Value = transform.position;
+                    networkIsRunning.Value = false;
+                }
+                else
+                {
+                    UpdatePositionServerRpc(transform.position, false, isFacingLeft);
+                }
+                
+                return; // Skip movement input processing
             }
-            return; // Skip normal movement and input processing
         }
 
         // Only process input for the local player
