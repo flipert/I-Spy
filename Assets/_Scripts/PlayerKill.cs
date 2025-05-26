@@ -397,6 +397,10 @@ public class PlayerKill : NetworkBehaviour
 
         // Exit aim mode after the shoot animation and cooldown
         ExitAimMode(); // This will also reset IsAiming = false
+        
+        // Add these lines to ensure animation state is reset after shooting
+        isPerformingKill = false;
+        IsKillAnimationPlaying = false;
     }
 
     [ServerRpc(RequireOwnership = true)]
