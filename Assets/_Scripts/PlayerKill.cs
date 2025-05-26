@@ -16,6 +16,7 @@ public class PlayerKill : NetworkBehaviour
     [SerializeField] private GameObject crosshairPrefab; // Assign UI crosshair prefab in inspector
     private Canvas uiCanvas;
     [SerializeField] private float shootCooldown = 0.5f; // Time between shots
+    [SerializeField] private float defaultShootAnimationDuration = 0.5f; // Fallback duration
 
     [Header("References")]
     [SerializeField] private Animator playerAnimator; // Assign your player's animator
@@ -38,6 +39,8 @@ public class PlayerKill : NetworkBehaviour
 
     void Start()
     {
+        Debug.Log("PlayerKill Start called.");
+
         IsKillAnimationPlaying = false; // Ensure it's reset on start/spawn
         IsAiming = false;
         
@@ -50,32 +53,24 @@ public class PlayerKill : NetworkBehaviour
                 Debug.LogWarning("PlayerKill could not find an Animator component! Kill animations won't play.");
             }
         }
+
+        // Attempt to find Canvas in Start (will also try in Update if needed)
+        FindUICanvas();
         
-        // Try to find the UI Canvas by name if not assigned
-        if (uiCanvas == null && IsOwner)
-        {
-            GameObject canvasObject = GameObject.Find("Canvas"); // Find the Canvas by name
-            if (canvasObject != null)
-            {
-                uiCanvas = canvasObject.GetComponent<Canvas>();
-                if (uiCanvas == null)
-                {
-                    Debug.LogWarning("PlayerKill found GameObject named 'Canvas' but it lacks a Canvas component!");
-                }
-            }
-            else
-            {
-                Debug.LogWarning("PlayerKill could not find a GameObject named 'Canvas'! Crosshair functionality will be limited.");
-            }
-        }
-        
-        // Log the layer mask to verify it's correct
         Debug.Log($"NPC Layer Mask: {LayerMaskToString(npcLayerMask)}");
+        Debug.Log($"Crosshair Prefab assigned: {crosshairPrefab != null}");
+        Debug.Log($"UI Canvas found in Start: {uiCanvas != null}");
     }
 
     void Update()
     {
         if (!IsOwner) return; // Only the owner player can initiate kills
+
+        // Try finding canvas in Update if Start failed
+        if (uiCanvas == null)
+        {
+            FindUICanvas();
+        }
 
         // Handle aim mode toggle
         if (Input.GetKeyDown(aimKey) && !isPerformingKill)
@@ -122,8 +117,10 @@ public class PlayerKill : NetworkBehaviour
 
     private void EnterAimMode()
     {
+        Debug.Log("PlayerKill EnterAimMode called.");
+
         isInAimMode = true;
-        IsAiming = true;
+        IsAiming = true; Debug.Log($"PlayerKill: Setting IsAiming = {IsAiming}");
         
         // Hide melee kill prompt if any
         if (currentTargetNPC != null)
@@ -140,25 +137,22 @@ public class PlayerKill : NetworkBehaviour
                  crosshairInstance = Instantiate(crosshairPrefab, uiCanvas.transform);
                  // Initial position doesn't matter much as it's updated immediately
                  crosshairInstance.transform.localPosition = Vector3.zero;
+                 Debug.Log($"Crosshair instantiated successfully: {crosshairInstance != null}. Parent: {(crosshairInstance.transform.parent != null ? crosshairInstance.transform.parent.name : "None")}");
             }
             else
             {
-                Debug.LogWarning("PlayerKill: Cannot instantiate UI crosshair without a UI Canvas reference.");
-                 // Fallback to a simple 3D indicator if no canvas is found?
-                 // Or maybe just log error and don't show crosshair.
-                 // For now, let's just not create it if canvas is missing.
+                Debug.LogWarning("PlayerKill: Cannot instantiate UI crosshair without a UI Canvas reference (uiCanvas is null before instantiate).");
             }
         }
         else
         {
-            Debug.LogWarning("PlayerKill: No Crosshair Prefab assigned for ranged kill.");
-            // Don't create a default primitive sphere if we want UI crosshair
+            Debug.LogWarning("PlayerKill: No Crosshair Prefab assigned for ranged kill. Cannot show crosshair.");
         }
         
         // Set aiming animation
         if (playerAnimator != null)
         {
-            playerAnimator.SetBool("IsAiming", true);
+            playerAnimator.SetBool("isAiming", true);
         }
         
         Debug.Log("Entered aim mode");
@@ -167,7 +161,7 @@ public class PlayerKill : NetworkBehaviour
     private void ExitAimMode()
     {
         isInAimMode = false;
-        IsAiming = false;
+        IsAiming = false; Debug.Log($"PlayerKill: Setting IsAiming = {IsAiming}");
         
         // Destroy crosshair
         if (crosshairInstance != null)
@@ -178,7 +172,7 @@ public class PlayerKill : NetworkBehaviour
         // Stop aiming animation
         if (playerAnimator != null)
         {
-            playerAnimator.SetBool("IsAiming", false);
+            playerAnimator.SetBool("isAiming", false);
         }
         
         Debug.Log("Exited aim mode");
@@ -245,6 +239,8 @@ public class PlayerKill : NetworkBehaviour
         if (playerAnimator != null)
         {
             playerAnimator.SetTrigger("Shoot");
+            // Start coroutine to reset state after animation
+            StartCoroutine(ResetAimStateAfterShoot());
         }
         
         // Check if crosshair is over an NPC
@@ -258,9 +254,13 @@ public class PlayerKill : NetworkBehaviour
             Vector3 rayStart = transform.position + Vector3.up; // Start from player's chest height
             Vector3 rayDirection = (currentAimWorldPosition - rayStart).normalized;
             
+            Debug.DrawRay(rayStart, rayDirection * aimRange, Color.yellow, 1f); // Draw ray in scene view
+            Debug.Log($"Shooting ray from {rayStart} with direction {rayDirection} and range {aimRange}");
+
             RaycastHit hit;
             if (Physics.Raycast(rayStart, rayDirection, out hit, aimRange, npcLayerMask))
             {
+                Debug.Log($"Raycast hit: {hit.collider.name} at {hit.point}");
                 NPCController npc = hit.collider.GetComponent<NPCController>();
                 if (npc != null)
                 {
@@ -268,16 +268,57 @@ public class PlayerKill : NetworkBehaviour
                     
                     // Initiate kill on server
                     InitiateRangedKillServerRpc(npc.NetworkObject);
-                    
-                    // Exit aim mode after successful shot
-                    ExitAimMode();
+                }
+                else
+                {
+                    Debug.Log("Raycast hit something, but it's not an NPC with NPCController.");
                 }
             }
             else
             {
-                Debug.Log("Shot missed");
+                Debug.Log("Shot missed: Raycast did not hit anything.");
             }
         }
+        else
+        {
+             Debug.LogWarning("PlayerKill: Shoot called but crosshairInstance is null. Cannot perform raycast.");
+        }
+        
+        // Exit aim mode immediately after shot (will be replaced by coroutine)
+        // ExitAimMode(); // REMOVED
+    }
+
+    private IEnumerator ResetAimStateAfterShoot()
+    {
+        // Attempt to get shoot animation duration
+        float shootAnimationDuration = defaultShootAnimationDuration;
+        if (playerAnimator != null)
+        {
+            RuntimeAnimatorController ac = playerAnimator.runtimeAnimatorController;
+            if (ac != null)
+            {
+                foreach (AnimationClip clip in ac.animationClips) {
+                    if (clip.name.Contains("Shoot")) { 
+                        shootAnimationDuration = clip.length;
+                        Debug.Log($"PlayerKill: Found Shoot animation '{clip.name}' with duration: {shootAnimationDuration}");
+                        break;
+                    }
+                }
+                if (shootAnimationDuration == 0f) {
+                    Debug.LogWarning("PlayerKill: Could not find Shoot animation clip length, defaulting to 0.5s.");
+                    shootAnimationDuration = 0.5f; // Fallback
+                }
+            }
+        }
+        
+        Debug.Log($"Player shoot animation in progress, will complete in {shootAnimationDuration} seconds");
+        yield return new WaitForSeconds(shootAnimationDuration);
+        Debug.Log("Player shoot animation complete, resetting state");
+        isPerformingKill = false;
+        IsKillAnimationPlaying = false; // Reset flag here
+        
+        // Exit aim mode
+        ExitAimMode();
     }
 
     [ServerRpc(RequireOwnership = true)]
@@ -520,5 +561,19 @@ public class PlayerKill : NetworkBehaviour
             }
         }
         return layers.TrimEnd(',', ' ');
+    }
+
+    private void FindUICanvas()
+    {
+         if (uiCanvas == null)
+         {
+            uiCanvas = FindObjectOfType<Canvas>();
+            if (uiCanvas == null)
+            {
+                Debug.LogWarning("PlayerKill: Still could not find a UI Canvas.");
+            } else {
+                Debug.Log($"PlayerKill: Successfully found UI Canvas in FindUICanvas: {uiCanvas.name}");
+            }
+         }
     }
 } 
