@@ -31,12 +31,14 @@ public class PlayerKill : NetworkBehaviour
     // Public flags for PlayerController to check
     public static bool IsKillAnimationPlaying { get; private set; } = false;
     public static bool IsAiming { get; private set; } = false;
+    public static bool IsShootingAnimationPlaying { get; private set; } = false;
 
     // Ranged kill variables
     private GameObject crosshairInstance;
     private Animator crosshairAnimator;
     private bool isInAimMode = false;
     private float lastShotTime = 0f;
+    private bool isShooting = false;
     
     // The world position the crosshair represents, for raycasting
     private Vector3 currentAimWorldPosition;
@@ -114,7 +116,10 @@ public class PlayerKill : NetworkBehaviour
                 // The rooting logic is in PlayerController's Update method already
                 
                 // Handle aiming, shooting, and exiting aim mode is handled by PlayerKill
-                UpdateCrosshairPosition();
+                if (!isShooting)
+                {
+                    UpdateCrosshairPosition();
+                }
                 
                 // Handle shooting
                 if (Input.GetMouseButtonDown(0) && Time.time - lastShotTime >= shootCooldown)
@@ -222,6 +227,11 @@ public class PlayerKill : NetworkBehaviour
         // Clear crosshair animator reference
         crosshairAnimator = null;
         
+        // Ensure isShooting flag is reset when exiting aim mode
+        isShooting = false;
+        IsShootingAnimationPlaying = false; // Ensure this is also reset
+        Debug.Log("PlayerKill: ExitAimMode called. Setting isShooting = false and IsShootingAnimationPlaying = false.");
+        
         // Stop aiming animation
         if (playerAnimator != null)
         {
@@ -303,6 +313,9 @@ public class PlayerKill : NetworkBehaviour
     private void Shoot()
     {
         lastShotTime = Time.time;
+        isShooting = true; // Set flag when shooting starts
+        IsShootingAnimationPlaying = true; // Set flag for PlayerController
+        Debug.Log("PlayerKill: Shoot initiated. Setting isShooting = true and IsShootingAnimationPlaying = true.");
         
         // Trigger shooting animation
         if (playerAnimator != null)
@@ -405,8 +418,12 @@ public class PlayerKill : NetworkBehaviour
         }
         
         Debug.Log($"Player shoot animation in progress, will complete in {playerShootAnimationDuration} seconds");
-        yield return new WaitForSeconds(playerShootAnimationDuration);
+        yield return new WaitForSeconds(playerShootAnimationDuration); // Wait for player anim first
         Debug.Log("Player shoot animation complete, resetting state");
+
+        // Reset player shooting animation flag after player animation finishes
+        IsShootingAnimationPlaying = false; // Reset flag here
+        Debug.Log("PlayerKill: Player shoot animation finished. Setting IsShootingAnimationPlaying = false.");
         
         // Add these lines to ensure animation state is reset after shooting
         isPerformingKill = false;
@@ -439,7 +456,7 @@ public class PlayerKill : NetworkBehaviour
         }
 
         // Exit aim mode after the shoot animation and crosshair animation
-        ExitAimMode(); // This will also reset IsAiming = false and destroy crosshair
+        ExitAimMode(); // This will also reset IsAiming = false, destroy crosshair, and reset isShooting and IsShootingAnimationPlaying
     }
 
     [ServerRpc(RequireOwnership = true)]
