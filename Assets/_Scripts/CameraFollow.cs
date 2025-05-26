@@ -45,12 +45,22 @@ public class CameraFollow : MonoBehaviour
     [Tooltip("How quickly the camera rotates to the new angle")]
     public float rotationSpeed = 5f;
     
+    [Header("Cinematic Zoom Settings")]
+    [Tooltip("Orthographic size when zoomed in for cinematic effect.")]
+    public float zoomedInOrthographicSize = 3f;
+    [Tooltip("How quickly the camera zooms in and out.")]
+    public float zoomSpeed = 2f;
+    
     // Current velocity for SmoothDamp
     private Vector3 currentVelocity = Vector3.zero;
     
     // Current and target rotation angles
     private float currentRotationAngle = 0f;
     private float targetRotationAngle = 0f;
+    
+    private Camera cameraComponent;
+    private float initialOrthographicSize;
+    private float targetOrthographicSize;
     
     // Enum for different follow styles
     public enum FollowStyle
@@ -69,6 +79,23 @@ public class CameraFollow : MonoBehaviour
     private void Start()
     {
         Debug.Log("CameraFollow: Start");
+        
+        cameraComponent = GetComponent<Camera>();
+        if (cameraComponent == null)
+        {
+            Debug.LogError("CameraFollow: No Camera component found on this GameObject! Zoom will not work.", this);
+        }
+        else if (!cameraComponent.orthographic)
+        {
+            Debug.LogWarning("CameraFollow: Camera is not orthographic. Cinematic zoom might not work as intended.", this);
+            initialOrthographicSize = cameraComponent.orthographicSize;
+        }
+        else
+        {
+            initialOrthographicSize = cameraComponent.orthographicSize;
+            Debug.Log($"CameraFollow: Initial orthographic size: {initialOrthographicSize}");
+        }
+        targetOrthographicSize = initialOrthographicSize;
         
         // If no target is set, try to find the local player
         if (target == null)
@@ -202,6 +229,19 @@ public class CameraFollow : MonoBehaviour
         if (target == null)
         {
             return; // Skip camera movement if target is null
+        }
+        
+        // Smoothly update orthographic size if camera component is available and orthographic
+        if (cameraComponent != null && cameraComponent.orthographic)
+        {
+            if (Mathf.Abs(cameraComponent.orthographicSize - targetOrthographicSize) > 0.01f)
+            {
+                cameraComponent.orthographicSize = Mathf.Lerp(cameraComponent.orthographicSize, targetOrthographicSize, Time.deltaTime * zoomSpeed);
+            }
+            else
+            {
+                cameraComponent.orthographicSize = targetOrthographicSize; // Snap to target if very close
+            }
         }
         
         // Handle rotation input from E and Q keys
@@ -408,5 +448,32 @@ public class CameraFollow : MonoBehaviour
         }
         
         isSearchingForPlayer = false;
+    }
+
+    // --- New Public Methods for Cinematic Zoom ---
+    public void StartCinematicZoom()
+    {
+        if (cameraComponent != null && cameraComponent.orthographic)
+        {
+            targetOrthographicSize = zoomedInOrthographicSize;
+            Debug.Log($"CameraFollow: Starting cinematic zoom. Target size: {targetOrthographicSize}");
+        }
+        else
+        {
+            Debug.LogWarning("CameraFollow: Cannot start cinematic zoom. Camera component missing or not orthographic.");
+        }
+    }
+
+    public void EndCinematicZoom()
+    {
+        if (cameraComponent != null && cameraComponent.orthographic)
+        {
+            targetOrthographicSize = initialOrthographicSize;
+            Debug.Log($"CameraFollow: Ending cinematic zoom. Target size: {targetOrthographicSize}");
+        }
+        else
+        { 
+            Debug.LogWarning("CameraFollow: Cannot end cinematic zoom. Camera component missing or not orthographic.");
+        }
     }
 }

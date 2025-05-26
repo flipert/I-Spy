@@ -17,6 +17,7 @@ public class CinematicEffectsController : MonoBehaviour
 
     private Animator cinematicFrameAnimator;
     private Coroutine activeCoroutine = null;
+    private CameraFollow mainCameraFollow;
 
     void Awake() // Changed from Start to Awake for Singleton initialization
     {
@@ -48,6 +49,20 @@ public class CinematicEffectsController : MonoBehaviour
         // Ensure the cinematic frame is disabled at the start
         cinematicFrameObject.SetActive(false);
         Debug.Log("CinematicEffectsController initialized. Frame is initially inactive.");
+
+        // Get CameraFollow component from the main camera
+        if (Camera.main != null)
+        {
+            mainCameraFollow = Camera.main.GetComponent<CameraFollow>();
+            if (mainCameraFollow == null)
+            {
+                Debug.LogWarning("CinematicEffectsController: No CameraFollow script found on the Main Camera. Cinematic zoom will not work.", this);
+            }
+        }
+        else
+        {
+            Debug.LogWarning("CinematicEffectsController: No Main Camera found. Cinematic zoom will not work.", this);
+        }
     }
 
     /// <summary>
@@ -70,6 +85,13 @@ public class CinematicEffectsController : MonoBehaviour
 
         Debug.Log("CinematicEffectsController: Showing cinematic bars.");
         cinematicFrameObject.SetActive(true);
+
+        // Start camera zoom
+        if (mainCameraFollow != null)
+        {
+            mainCameraFollow.StartCinematicZoom();
+        }
+
         // The Animator's default state or an 'Entry' transition should handle playing 'CinematicFrameIn'
         // If 'CinematicFrameIn' isn't playing automatically, you might need to reset the animator or play the state explicitly:
         // cinematicFrameAnimator.Play("CinematicFrameIn", 0, 0f); // Or your 'In' state name
@@ -92,6 +114,12 @@ public class CinematicEffectsController : MonoBehaviour
             return; // Already inactive or in the process of hiding
         }
         
+        // Start camera zoom out *before* triggering the animation
+        if (mainCameraFollow != null)
+        {
+            mainCameraFollow.EndCinematicZoom();
+        }
+
         if (activeCoroutine != null)
         {
             // If already in the process of hiding, don't restart
