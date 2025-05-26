@@ -7057,7 +7057,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f4020faa3e60246ecafa349db99a8652, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  fallbackPlayerPrefab: {fileID: 0}
+  fallbackPlayerPrefab: {fileID: 5964388756769884995, guid: 821cb086e733f4acf97ea6b1444473cf, type: 3}
   spawnPoints:
   - {fileID: 773178457}
   - {fileID: 400973250}
@@ -11516,6 +11516,8 @@ MonoBehaviour:
   topDownFollow: 1
   rotationAngle: 45
   rotationSpeed: 5
+  zoomedInOrthographicSize: 3
+  zoomSpeed: 2
 --- !u!82 &963194230
 AudioSource:
   m_ObjectHideFlags: 0
