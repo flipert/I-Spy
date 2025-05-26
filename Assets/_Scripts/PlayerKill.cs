@@ -7,7 +7,8 @@ public class PlayerKill : NetworkBehaviour
 {
     [Header("Settings")]
     [SerializeField] private float killRange = 2f;
-    [SerializeField] private LayerMask npcLayerMask;
+    [SerializeField] private LayerMask meleeTargetLayerMask; // Renamed for clarity
+    [SerializeField] private LayerMask rangedTargetLayerMask; // New mask for ranged attacks
     [SerializeField] private KeyCode killKey = KeyCode.Space; // Default to space bar
     
     [Header("Ranged Kill Settings")]
@@ -67,7 +68,15 @@ public class PlayerKill : NetworkBehaviour
         // Attempt to find Canvas in Start (will also try in Update if needed)
         FindUICanvas();
         
-        Debug.Log($"NPC Layer Mask: {LayerMaskToString(npcLayerMask)}");
+        // Automatically set rangedTargetLayerMask to include NPC and Default layers if not set
+        if (rangedTargetLayerMask.value == 0)
+        {
+             rangedTargetLayerMask = LayerMask.GetMask("NPC", "Default");
+             Debug.Log($"PlayerKill: Automatically set Ranged Target Layer Mask to: {LayerMaskToString(rangedTargetLayerMask)}");
+        }
+
+        Debug.Log($"Melee Target Layer Mask: {LayerMaskToString(meleeTargetLayerMask)}"); // Log renamed mask
+        Debug.Log($"Ranged Target Layer Mask: {LayerMaskToString(rangedTargetLayerMask)}"); // Log new mask
         Debug.Log($"Crosshair Prefab assigned: {crosshairPrefab != null}");
         Debug.Log($"UI Canvas found in Start: {uiCanvas != null}");
     }
@@ -205,59 +214,69 @@ public class PlayerKill : NetworkBehaviour
 
     private void UpdateCrosshairPosition()
     {
-        if (crosshairInstance == null || Camera.main == null) return;
+        if (crosshairInstance == null || Camera.main == null || uiCanvas == null) return;
         
         Camera mainCamera = Camera.main;
-
-        // Project mouse position to a plane at the player's height
-        Plane playerPlane = new Plane(Vector3.up, transform.position.y + 1f); // Plane slightly above player
-        Ray ray = mainCamera.ScreenPointToRay(Input.mousePosition);
+        RectTransform canvasRect = uiCanvas.GetComponent<RectTransform>();
+        RectTransform crosshairRect = crosshairInstance.GetComponent<RectTransform>();
         
+        Debug.Log($"Crosshair Rect - Pivot: {crosshairRect.pivot}, Anchors: {crosshairRect.anchorMin} to {crosshairRect.anchorMax}");
+
+        // Get player position in screen space (use base position for screen point origin)
+        Vector3 screenPointPlayerBase = mainCamera.WorldToScreenPoint(transform.position); 
+        // Vector3 screenPointPlayer = mainCamera.WorldToScreenPoint(transform.position + Vector3.up * 1f); // Slightly above player - might not be needed for origin
+        Debug.Log($"Screen Point Player Base: {screenPointPlayerBase}");
+
+        // Get mouse position in screen space
+        Vector3 screenPointMouse = Input.mousePosition;
+        Debug.Log($"Screen Point Mouse (Raw): {screenPointMouse}");
+
+        // Calculate vector from player screen base point to mouse screen point
+        Vector3 screenVectorPlayerToMouse = screenPointMouse - screenPointPlayerBase;
+        Debug.Log($"Screen Vector Player to Mouse: {screenVectorPlayerToMouse}");
+
+        // Calculate the screen space radius corresponding to aimRange
+        // Project a point 'aimRange' units to the right of the player in world space at the player's base height
+        Vector3 worldPointAtAimRangeRightBase = transform.position + transform.right * aimRange;
+        Vector3 screenPointAtAimRangeRightBase = mainCamera.WorldToScreenPoint(worldPointAtAimRangeRightBase);
+        float screenAimRadius = Vector3.Distance(screenPointPlayerBase, screenPointAtAimRangeRightBase);
+        Debug.Log($"Screen Aim Radius (calculated from {aimRange} world units): {screenAimRadius}");
+
+        // Clamp the screen vector to the calculated radius
+        Vector3 clampedScreenVector = Vector3.ClampMagnitude(screenVectorPlayerToMouse, screenAimRadius);
+        Debug.Log($"Clamped Screen Vector: {clampedScreenVector}");
+        
+        // Calculate the desired screen position for the crosshair by adding the clamped vector to the player's screen base position
+        Vector3 screenPositionCrosshair = screenPointPlayerBase + clampedScreenVector;
+        Debug.Log($"Screen Position Crosshair (calculated): {screenPositionCrosshair}");
+
+        // Position the UI crosshair using RectTransformUtility
+        Vector2 canvasPosition;
+        // Use null camera for Screen Space - Overlay, or mainCamera for Screen Space - Camera
+        // Assuming Screen Space - Overlay for now based on previous logs
+        RectTransformUtility.ScreenPointToLocalPointInRectangle(canvasRect, screenPositionCrosshair, null, out canvasPosition);
+        Debug.Log($"Canvas Position (calculated): {canvasPosition}");
+        crosshairInstance.GetComponent<RectTransform>().anchoredPosition = canvasPosition;
+
+        // Calculate the corresponding world position for raycasting
+        // Cast a ray from the camera through the clamped screen position onto a plane at player height
+        Ray rayThroughCrosshair = mainCamera.ScreenPointToRay(screenPositionCrosshair);
+        Plane playerPlane = new Plane(Vector3.up, transform.position.y + 1f);
         float hitdist;
-        Vector3 targetWorldPosition = transform.position; // Start from player position
-
-        if (playerPlane.Raycast(ray, out hitdist))
+        if (playerPlane.Raycast(rayThroughCrosshair, out hitdist))
         {
-            Vector3 point = ray.GetPoint(hitdist);
-            Vector3 direction = (point - transform.position);
-
-            // Clamp the target position to the aimRange
-            if (direction.magnitude > aimRange)
-            {
-                targetWorldPosition = transform.position + direction.normalized * aimRange;
-            }
-            else
-            {
-                 targetWorldPosition = point; // If within range, aim directly at mouse projection
-                 targetWorldPosition.y = transform.position.y + 1f; // Maintain height
-            }
-        }
-        
-        // Store the calculated world position for shooting
-        currentAimWorldPosition = targetWorldPosition;
-        
-        // Now, convert the world position to screen position to place the UI crosshair
-        Vector3 screenPosition = mainCamera.WorldToScreenPoint(currentAimWorldPosition);
-        
-        // Position the UI crosshair
-        if (uiCanvas != null && crosshairInstance.transform is RectTransform)
-        {
-             RectTransform canvasRect = uiCanvas.GetComponent<RectTransform>();
-             Vector2 canvasPosition;
-             // Use the screen position directly for the UI crosshair
-             RectTransformUtility.ScreenPointToLocalPointInRectangle(canvasRect, screenPosition, mainCamera, out canvasPosition);
-             crosshairInstance.GetComponent<RectTransform>().anchoredPosition = canvasPosition;
+            currentAimWorldPosition = rayThroughCrosshair.GetPoint(hitdist);
+        } else {
+            // Fallback: If raycast fails (e.g., plane is behind camera), use a point in front of player
+             currentAimWorldPosition = transform.position + transform.forward * aimRange + Vector3.up * 1f;
         }
 
         // Handle player sprite flipping based on aim direction (relative to camera)
         if (playerController != null && Camera.main != null)
         {
             // Determine if aim point is left or right of the player in screen space
-            Vector3 screenPointToAim = mainCamera.WorldToScreenPoint(currentAimWorldPosition);
-            Vector3 screenPointPlayer = mainCamera.WorldToScreenPoint(transform.position);
-
-            bool shouldFaceLeft = (screenPointToAim.x < screenPointPlayer.x);
-
+            // Use the clamped screen position for flipping logic
+            bool shouldFaceLeft = (screenPositionCrosshair.x < screenPointPlayerBase.x);
             playerController.SetFacingLeft(shouldFaceLeft); // Call method in PlayerController
         }
     }
@@ -274,34 +293,63 @@ public class PlayerKill : NetworkBehaviour
             StartCoroutine(ResetAimStateAfterShoot());
         }
         
-        // Check if crosshair is over an NPC using the calculated world position
-        // The raycast should originate from the player and go towards the currentAimWorldPosition
-        Vector3 rayStart = transform.position + Vector3.up; // Start from player's chest height
-        Vector3 rayDirection = (currentAimWorldPosition - rayStart).normalized;
-        
-        Debug.DrawRay(rayStart, rayDirection * aimRange, Color.red, 2f); // Draw ray in scene view
-        Debug.Log($"Shooting ray from {rayStart} with direction {rayDirection} and range {aimRange}");
+        // Check what is under the mouse cursor by raycasting from the camera
+        Camera mainCamera = Camera.main;
+        if (mainCamera == null) return;
 
+        Ray ray = mainCamera.ScreenPointToRay(Input.mousePosition);
         RaycastHit hit;
-        if (Physics.Raycast(rayStart, rayDirection, out hit, aimRange, npcLayerMask))
+
+        // Use a large distance for the camera raycast to ensure it passes through objects
+        float cameraRaycastDistance = 1000f; // Use a large number or Mathf.Infinity if appropriate
+
+        Debug.DrawRay(ray.origin, ray.direction * cameraRaycastDistance, Color.blue, 2f); // Draw ray from camera
+        Debug.Log($"Shooting ray from camera through mouse position. Ray: {ray.origin} -> {ray.direction}. Distance: {cameraRaycastDistance}. Targeting Layers: {LayerMaskToString(rangedTargetLayerMask)}");
+
+        // Raycast and check for objects on the rangedTargetLayerMask with a large distance
+        if (Physics.Raycast(ray, out hit, cameraRaycastDistance, rangedTargetLayerMask))
         {
-            Debug.Log($"Raycast hit: {hit.collider.name} at {hit.point}. Hit object layer: {LayerMask.LayerToName(hit.collider.gameObject.layer)}");
-            NPCController npc = hit.collider.GetComponent<NPCController>();
-            if (npc != null)
+            Debug.Log($"Camera Raycast hit: {hit.collider.name} at {hit.point}. Hit object tag: {hit.collider.gameObject.tag}. Hit object layer: {LayerMask.LayerToName(hit.collider.gameObject.layer)}");
+            
+            // Now check if the hit object is within the player's defined aimRange
+            float distanceToHit = Vector3.Distance(transform.position, hit.point);
+            if (distanceToHit <= aimRange)
             {
-                Debug.Log($"Shot hit NPC: {npc.name}. Initiating kill.");
-                
-                // Initiate kill on server
-                InitiateRangedKillServerRpc(npc.NetworkObject);
+                Debug.Log($"Hit object {hit.collider.name} is within aim range ({distanceToHit.ToString("F2")} <= {aimRange.ToString("F2")}).");
+
+                // Check if the hit object has the "NPC" tag
+                if (hit.collider.CompareTag("NPC"))
+                {
+                    NPCController npc = hit.collider.GetComponent<NPCController>();
+                    if (npc != null)
+                    {
+                        Debug.Log($"Shot hit NPC: {npc.name}. Initiating ranged kill on NPC.");
+                        
+                        // Initiate kill on server via NPCController's method
+                        InitiateRangedKillServerRpc(npc.NetworkObject);
+                    }
+                }
+                // Check if the hit object has the "Player" tag
+                else if (hit.collider.CompareTag("Player"))
+                {
+                    // Find the PlayerController of the hit object
+                    PlayerController hitPlayerController = hit.collider.GetComponent<PlayerController>();
+                    if (hitPlayerController != null)
+                    {
+                        Debug.Log($"Shot hit Player: {hitPlayerController.name}. Initiating ranged kill on Player.");
+                        // Initiate kill on server via PlayerController's method
+                        InitiateRangedPlayerKillServerRpc(hitPlayerController.NetworkObject);
+                    }
+                }
             }
             else
             {
-                Debug.Log("Raycast hit something, but it's not an NPC with NPCController.");
+                 Debug.Log($"Hit object {hit.collider.name} is OUTSIDE aim range ({distanceToHit.ToString("F2")} > {aimRange.ToString("F2")}). No kill initiated.");
             }
         }
         else
         {
-            Debug.Log("Shot missed: Raycast did not hit anything.");
+            Debug.Log($"Shot missed: Camera Raycast did not hit anything on the {LayerMaskToString(rangedTargetLayerMask)} layers within {cameraRaycastDistance} distance.");
         }
         
         // Aim mode exit is handled by ResetAimStateAfterShoot coroutine
@@ -356,6 +404,38 @@ public class PlayerKill : NetworkBehaviour
         }
     }
 
+    [ServerRpc(RequireOwnership = true)]
+    private void InitiateRangedPlayerKillServerRpc(NetworkObjectReference targetPlayerRef)
+    {
+        if (targetPlayerRef.TryGet(out NetworkObject targetPlayerNetworkObject))
+        {
+            if (targetPlayerNetworkObject.TryGetComponent<PlayerController>(out PlayerController playerToKill))
+            {
+                // Optional: Add a distance check here on the server for security
+                float distanceToTarget = Vector3.Distance(transform.position, playerToKill.transform.position);
+                if (distanceToTarget > aimRange + 1f) // Add a small buffer for leniency
+                {
+                   Debug.LogWarning($"Player {OwnerClientId} tried to kill Player from too far with ranged attack. Dist: {distanceToTarget}");
+                   return;
+                }
+
+                // Tell all clients to play shooting animation (if needed, or handle in PlayerController death)
+                PlayShootAnimationClientRpc(); // This plays on the killer, consider if hit player needs anim
+
+                // Call the KillTarget method on the killer's PlayerController (on the server)
+                // The PlayerController's KillTarget method should handle notifying the GameManager and the target player
+                if (playerController != null)
+                {
+                    playerController.KillTarget(playerToKill);
+                }
+                else
+                {
+                    Debug.LogError("PlayerKill: Cannot initiate player kill because PlayerController reference is null on server.");
+                }
+            }
+        }
+    }
+
     [ClientRpc]
     private void PlayShootAnimationClientRpc()
     {
@@ -382,7 +462,8 @@ public class PlayerKill : NetworkBehaviour
         // Don't find new targets if we're performing a kill
         if (isPerformingKill) return;
 
-        int numFound = Physics.OverlapSphereNonAlloc(transform.position, killRange, nearbyNPCs, npcLayerMask);
+        // Use meleeTargetLayerMask for melee detection
+        int numFound = Physics.OverlapSphereNonAlloc(transform.position, killRange, nearbyNPCs, meleeTargetLayerMask);
         NPCController closestNPC = null;
         float closestDistanceSqr = killRange * killRange + 1; // Start with a value greater than max possible squared distance
 
@@ -591,7 +672,7 @@ public class PlayerKill : NetworkBehaviour
             {
                 Debug.LogWarning("PlayerKill: Still could not find a UI Canvas.");
             } else {
-                Debug.Log($"PlayerKill: Successfully found UI Canvas in FindUICanvas: {uiCanvas.name}");
+                Debug.Log($"PlayerKill: Successfully found UI Canvas in FindUICanvas: {uiCanvas.name}. RenderMode: {uiCanvas.renderMode}, ScaleFactor: {uiCanvas.scaleFactor}");
             }
          }
     }

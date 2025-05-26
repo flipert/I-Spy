@@ -332,15 +332,19 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   killRange: 1
-  npcLayerMask:
+  meleeTargetLayerMask:
     serializedVersion: 2
-    m_Bits: 1024
+    m_Bits: 1025
+  rangedTargetLayerMask:
+    serializedVersion: 2
+    m_Bits: 1025
   killKey: 32
   aimKey: 9
-  aimRange: 2
+  aimRange: 6
   crosshairPrefab: {fileID: 8826991618030741413, guid: 54be190b4269e44bfbf8339397c28708, type: 3}
-  shootCooldown: 20
+  shootCooldown: 0
   defaultShootAnimationDuration: 0.5
+  mouseSensitivity: 3
   playerAnimator: {fileID: 3879874863887253514}
 --- !u!1 &6451389695068673682
 GameObject:
