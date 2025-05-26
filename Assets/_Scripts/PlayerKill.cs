@@ -211,6 +211,12 @@ public class PlayerKill : NetworkBehaviour
             playerAnimator.SetBool("isAiming", true);
         }
         
+        // Show cinematic bars
+        if (CinematicEffectsController.Instance != null) // Use Singleton instance
+        {
+            CinematicEffectsController.Instance.ShowCinematicBars(); // Use Singleton instance
+        }
+        
         Debug.Log("Entered aim mode");
     }
 
@@ -236,6 +242,12 @@ public class PlayerKill : NetworkBehaviour
         if (playerAnimator != null)
         {
             playerAnimator.SetBool("isAiming", false);
+        }
+        
+        // Hide cinematic bars
+        if (CinematicEffectsController.Instance != null) // Use Singleton instance
+        {
+            CinematicEffectsController.Instance.HideCinematicBars(); // Use Singleton instance
         }
         
         Debug.Log("Exited aim mode");
