@@ -34,6 +34,7 @@ public class PlayerKill : NetworkBehaviour
 
     // Ranged kill variables
     private GameObject crosshairInstance;
+    private Animator crosshairAnimator;
     private bool isInAimMode = false;
     private float lastShotTime = 0f;
     
@@ -181,6 +182,13 @@ public class PlayerKill : NetworkBehaviour
                  // Initial position doesn't matter much as it's updated immediately
                  crosshairInstance.transform.localPosition = Vector3.zero;
                  Debug.Log($"Crosshair instantiated successfully: {crosshairInstance != null}. Parent: {(crosshairInstance.transform.parent != null ? crosshairInstance.transform.parent.name : "None")}");
+                 
+                 // Get the Animator component from the instantiated crosshair
+                 crosshairAnimator = crosshairInstance.GetComponent<Animator>();
+                 if (crosshairAnimator == null)
+                 {
+                     Debug.LogWarning("PlayerKill: Crosshair prefab does not have an Animator component. Cannot play animations.");
+                 }
             }
             else
             {
@@ -211,6 +219,8 @@ public class PlayerKill : NetworkBehaviour
         {
             Destroy(crosshairInstance);
         }
+        // Clear crosshair animator reference
+        crosshairAnimator = null;
         
         // Stop aiming animation
         if (playerAnimator != null)
@@ -302,6 +312,13 @@ public class PlayerKill : NetworkBehaviour
             StartCoroutine(ResetAimStateAfterShoot());
         }
         
+        // Trigger crosshair animation if animator exists
+        if (crosshairAnimator != null)
+        {
+            // Assuming you have a trigger parameter named "Break" in your crosshair animator
+            crosshairAnimator.SetTrigger("Break");
+        }
+        
         // Check what is under the mouse cursor by raycasting from the camera
         Camera mainCamera = Camera.main;
         if (mainCamera == null) return;
@@ -366,8 +383,8 @@ public class PlayerKill : NetworkBehaviour
 
     private IEnumerator ResetAimStateAfterShoot()
     {
-        // Attempt to get shoot animation duration
-        float shootAnimationDuration = defaultShootAnimationDuration;
+        // Attempt to get player shoot animation duration
+        float playerShootAnimationDuration = defaultShootAnimationDuration;
         if (playerAnimator != null)
         {
             RuntimeAnimatorController ac = playerAnimator.runtimeAnimatorController;
@@ -375,32 +392,54 @@ public class PlayerKill : NetworkBehaviour
             {
                 foreach (AnimationClip clip in ac.animationClips) {
                     if (clip.name.Contains("Shoot")) { 
-                        shootAnimationDuration = clip.length;
-                        Debug.Log($"PlayerKill: Found Shoot animation '{clip.name}' with duration: {shootAnimationDuration}");
+                        playerShootAnimationDuration = clip.length;
+                        Debug.Log($"PlayerKill: Found Shoot animation '{clip.name}' with duration: {playerShootAnimationDuration}");
                         break;
                     }
                 }
-                if (shootAnimationDuration == 0f) {
+                if (playerShootAnimationDuration == 0f) {
                     Debug.LogWarning("PlayerKill: Could not find Shoot animation clip length, defaulting to 0.5s.");
-                    shootAnimationDuration = 0.5f; // Fallback
+                    playerShootAnimationDuration = 0.5f; // Fallback
                 }
             }
         }
         
-        Debug.Log($"Player shoot animation in progress, will complete in {shootAnimationDuration} seconds");
-        yield return new WaitForSeconds(shootAnimationDuration);
+        Debug.Log($"Player shoot animation in progress, will complete in {playerShootAnimationDuration} seconds");
+        yield return new WaitForSeconds(playerShootAnimationDuration);
         Debug.Log("Player shoot animation complete, resetting state");
-        
-        // Reset flags. isPerformingKill and IsKillAnimationPlaying are handled by this coroutine.
-        // isPerformingKill = false; // Handled by mele kill coroutine
-        // IsKillAnimationPlaying = false; // Handled by mele kill coroutine
-
-        // Exit aim mode after the shoot animation and cooldown
-        ExitAimMode(); // This will also reset IsAiming = false
         
         // Add these lines to ensure animation state is reset after shooting
         isPerformingKill = false;
         IsKillAnimationPlaying = false;
+
+        // Now wait for the crosshair "Broken" animation to finish, if an animator exists
+        if (crosshairAnimator != null)
+        {
+            // Find the duration of the "Broken" state/clip
+            float crosshairBreakAnimationDuration = 0f;
+            RuntimeAnimatorController ac = crosshairAnimator.runtimeAnimatorController;
+            if (ac != null)
+            {
+                foreach (AnimationClip clip in ac.animationClips) {
+                    // Assuming the clip name contains "Broken"
+                    if (clip.name.Contains("Broken")) { 
+                        crosshairBreakAnimationDuration = clip.length;
+                        Debug.Log($"PlayerKill: Found Crosshair Break animation '{clip.name}' with duration: {crosshairBreakAnimationDuration}");
+                        break;
+                    }
+                }
+                 if (crosshairBreakAnimationDuration == 0f) {
+                    Debug.LogWarning("PlayerKill: Could not find Crosshair Broken animation clip length, defaulting to 0s. Crosshair will disappear immediately after player anim.");
+                }
+            }
+
+            Debug.Log($"Waiting for crosshair break animation to complete in {crosshairBreakAnimationDuration} seconds");
+            yield return new WaitForSeconds(crosshairBreakAnimationDuration);
+            Debug.Log("Crosshair break animation complete.");
+        }
+
+        // Exit aim mode after the shoot animation and crosshair animation
+        ExitAimMode(); // This will also reset IsAiming = false and destroy crosshair
     }
 
     [ServerRpc(RequireOwnership = true)]
