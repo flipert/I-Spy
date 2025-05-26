@@ -91,6 +91,13 @@ public class PlayerKill : NetworkBehaviour
             FindUICanvas();
         }
 
+        // Handle aim mode toggle
+        // Allow toggling as long as a kill animation is not performing
+        if (Input.GetKeyDown(aimKey) && !isPerformingKill)
+        {
+            ToggleAimMode();
+        }
+
         // If kill animation is playing OR if aiming, handle differently
         if (IsOwner)
         {
@@ -103,8 +110,9 @@ public class PlayerKill : NetworkBehaviour
             if (PlayerKill.IsAiming)
             {
                 // Root player in place handled in PlayerController
+                // The rooting logic is in PlayerController's Update method already
                 
-                // Handle aiming
+                // Handle aiming, shooting, and exiting aim mode is handled by PlayerKill
                 UpdateCrosshairPosition();
                 
                 // Handle shooting
@@ -113,24 +121,19 @@ public class PlayerKill : NetworkBehaviour
                     Shoot();
                 }
                 
-                // Cancel aim mode with right click or pressing aim key again
+                // Cancel aim mode with right click
                 if (Input.GetMouseButtonDown(1))
                 {
                     ExitAimMode();
                 }
                 
-                return; // Skip movement input processing
+                // DON'T return here, allow camera facing logic and networking to run
             }
         }
 
-        // Handle aim mode toggle
-        if (Input.GetKeyDown(aimKey) && !isPerformingKill)
-        {
-            ToggleAimMode();
-        }
-
         // Normal melee kill handling
-        if (!isInAimMode) // Only do melee logic if not in aim mode
+        // Only do melee logic if not in aim mode and not performing any kill animation
+        if (!isInAimMode && !isPerformingKill) 
         {
              FindTargetNPC();
              HandleKillInput();
@@ -145,7 +148,13 @@ public class PlayerKill : NetworkBehaviour
         }
         else
         {
-            EnterAimMode();
+            // Only enter aim mode if cooldown has passed
+            if (Time.time - lastShotTime >= shootCooldown)
+            {
+                EnterAimMode();
+            } else {
+                 Debug.Log($"PlayerKill: Cannot enter aim mode, shoot cooldown still active. Time remaining: {shootCooldown - (Time.time - lastShotTime):F2}s");
+            }
         }
     }
 
@@ -381,11 +390,13 @@ public class PlayerKill : NetworkBehaviour
         Debug.Log($"Player shoot animation in progress, will complete in {shootAnimationDuration} seconds");
         yield return new WaitForSeconds(shootAnimationDuration);
         Debug.Log("Player shoot animation complete, resetting state");
-        isPerformingKill = false;
-        IsKillAnimationPlaying = false; // Reset flag here
         
-        // Exit aim mode
-        ExitAimMode();
+        // Reset flags. isPerformingKill and IsKillAnimationPlaying are handled by this coroutine.
+        // isPerformingKill = false; // Handled by mele kill coroutine
+        // IsKillAnimationPlaying = false; // Handled by mele kill coroutine
+
+        // Exit aim mode after the shoot animation and cooldown
+        ExitAimMode(); // This will also reset IsAiming = false
     }
 
     [ServerRpc(RequireOwnership = true)]
