@@ -78,6 +78,15 @@ public class PlayerController : NetworkBehaviour
 
     void Update()
     {
+        if (!IsOwner) return; // Only the owner player can initiate kills
+
+        // Try finding canvas in Update if Start failed
+        // These lines were mistakenly added here and belong in PlayerKill.cs
+        // if (uiCanvas == null)
+        // {
+        //     FindUICanvas();
+        // }
+
         // If kill animation is playing OR if aiming, handle differently
         if (IsOwner)
         {
@@ -99,34 +108,30 @@ public class PlayerController : NetworkBehaviour
             // Check if player is aiming
             if (PlayerKill.IsAiming)
             {
-                // Root player in place
-                if (rb != null) 
+                // Root player in place handled in PlayerController
+                // The rooting logic is in PlayerController's Update method already
+                
+                // Handle aiming, shooting, and exiting aim mode is handled by PlayerKill
+                // We only need to ensure movement is stopped here.
+                
+                // Ensure movement is stopped while aiming
+                if (rb != null)
                 {
-                    rb.velocity = Vector3.zero;
-                    rb.angularVelocity = Vector3.zero;
+                     rb.velocity = Vector3.zero;
+                     rb.angularVelocity = Vector3.zero;
                 }
-                if (animator != null) 
+                if (animator != null)
                 {
                     animator.SetBool("Running", false);
                 }
                 
-                // Still update network position so other clients see us stopped
-                if (IsServer)
-                {
-                    networkPosition.Value = transform.position;
-                    networkIsRunning.Value = false;
-                }
-                else
-                {
-                    UpdatePositionServerRpc(transform.position, false, isFacingLeft);
-                }
-                
-                return; // Skip movement input processing
+                // DON'T return here, allow camera facing logic and networking to run
+                // return; // REMOVED
             }
         }
 
-        // Only process input for the local player
-        if (IsOwner)
+        // Only process input for the local player if not aiming or performing kill
+        if (IsOwner && !PlayerKill.IsAiming && !PlayerKill.IsKillAnimationPlaying)
         {
             // Get input
             float moveX = Input.GetAxisRaw("Horizontal");
@@ -707,6 +712,28 @@ public class PlayerController : NetworkBehaviour
             if (targetPlayer != null)
             {
                 KillTarget(targetPlayer);
+            }
+        }
+    }
+
+    // Public method to set the player's facing direction (used for aiming)
+    public void SetFacingLeft(bool facingLeft)
+    {
+        Debug.Log($"PlayerController: SetFacingLeft called with: {facingLeft}");
+        if (isFacingLeft != facingLeft)
+        {
+            isFacingLeft = facingLeft;
+            
+            // Also update sprite flip immediately for local player
+            if (IsOwner && characterSprite != null)
+            {
+                characterSprite.flipX = isFacingLeft;
+            }
+
+            // Sync the facing direction to other clients
+            if (IsOwner)
+            {
+                UpdatePositionServerRpc(transform.position, isMoving, isFacingLeft); // Reuse existing RPC
             }
         }
     }

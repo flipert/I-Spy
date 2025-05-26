@@ -17,9 +17,11 @@ public class PlayerKill : NetworkBehaviour
     private Canvas uiCanvas;
     [SerializeField] private float shootCooldown = 0.5f; // Time between shots
     [SerializeField] private float defaultShootAnimationDuration = 0.5f; // Fallback duration
+    [SerializeField] private float mouseSensitivity = 3.0f; // Increased sensitivity (might not be needed for direct follow)
 
     [Header("References")]
     [SerializeField] private Animator playerAnimator; // Assign your player's animator
+    private PlayerController playerController; // Reference to PlayerController
 
     private NPCController currentTargetNPC;
     private Collider[] nearbyNPCs = new Collider[5]; // Pre-allocate for minor optimization
@@ -36,6 +38,7 @@ public class PlayerKill : NetworkBehaviour
     
     // The world position the crosshair represents, for raycasting
     private Vector3 currentAimWorldPosition;
+    private float currentAimAngle = 0f; // Angle on XZ plane
 
     void Start()
     {
@@ -52,6 +55,13 @@ public class PlayerKill : NetworkBehaviour
             {
                 Debug.LogWarning("PlayerKill could not find an Animator component! Kill animations won't play.");
             }
+        }
+        
+        // Get PlayerController reference
+        playerController = GetComponent<PlayerController>();
+        if (playerController == null)
+        {
+            Debug.LogError("PlayerKill could not find PlayerController component!");
         }
 
         // Attempt to find Canvas in Start (will also try in Update if needed)
@@ -72,34 +82,49 @@ public class PlayerKill : NetworkBehaviour
             FindUICanvas();
         }
 
+        // If kill animation is playing OR if aiming, handle differently
+        if (IsOwner)
+        {
+            if (PlayerKill.IsKillAnimationPlaying)
+            {
+                return; // Skip normal movement and input processing
+            }
+            
+            // Check if player is aiming
+            if (PlayerKill.IsAiming)
+            {
+                // Root player in place handled in PlayerController
+                
+                // Handle aiming
+                UpdateCrosshairPosition();
+                
+                // Handle shooting
+                if (Input.GetMouseButtonDown(0) && Time.time - lastShotTime >= shootCooldown)
+                {
+                    Shoot();
+                }
+                
+                // Cancel aim mode with right click or pressing aim key again
+                if (Input.GetMouseButtonDown(1))
+                {
+                    ExitAimMode();
+                }
+                
+                return; // Skip movement input processing
+            }
+        }
+
         // Handle aim mode toggle
         if (Input.GetKeyDown(aimKey) && !isPerformingKill)
         {
             ToggleAimMode();
         }
 
-        // Handle aiming
-        if (isInAimMode)
+        // Normal melee kill handling
+        if (!isInAimMode) // Only do melee logic if not in aim mode
         {
-            UpdateCrosshairPosition();
-            
-            // Handle shooting
-            if (Input.GetMouseButtonDown(0) && Time.time - lastShotTime >= shootCooldown)
-            {
-                Shoot();
-            }
-            
-            // Cancel aim mode with right click or pressing aim key again
-            if (Input.GetMouseButtonDown(1))
-            {
-                ExitAimMode();
-            }
-        }
-        else
-        {
-            // Normal melee kill handling
-            FindTargetNPC();
-            HandleKillInput();
+             FindTargetNPC();
+             HandleKillInput();
         }
     }
 
@@ -182,53 +207,59 @@ public class PlayerKill : NetworkBehaviour
     {
         if (crosshairInstance == null || Camera.main == null) return;
         
-        // Calculate the world position the mouse is aiming at
         Camera mainCamera = Camera.main;
-        Plane playerPlane = new Plane(Vector3.up, transform.position);
+
+        // Project mouse position to a plane at the player's height
+        Plane playerPlane = new Plane(Vector3.up, transform.position.y + 1f); // Plane slightly above player
         Ray ray = mainCamera.ScreenPointToRay(Input.mousePosition);
         
-        float enter = 0f;
-        Vector3 targetWorldPosition = transform.position + Vector3.forward * aimRange; // Default if raycast misses
+        float hitdist;
+        Vector3 targetWorldPosition = transform.position; // Start from player position
 
-        if (playerPlane.Raycast(ray, out enter))
+        if (playerPlane.Raycast(ray, out hitdist))
         {
-            Vector3 hitPoint = ray.GetPoint(enter);
-            Vector3 direction = (hitPoint - transform.position).normalized;
-            
-            // Keep the target position at a fixed distance from the player within the aimRange
-            targetWorldPosition = transform.position + direction * aimRange;
-            // Ensure the target position is at player's height + a small offset
-            targetWorldPosition.y = transform.position.y + 1f; 
+            Vector3 point = ray.GetPoint(hitdist);
+            Vector3 direction = (point - transform.position);
+
+            // Clamp the target position to the aimRange
+            if (direction.magnitude > aimRange)
+            {
+                targetWorldPosition = transform.position + direction.normalized * aimRange;
+            }
+            else
+            {
+                 targetWorldPosition = point; // If within range, aim directly at mouse projection
+                 targetWorldPosition.y = transform.position.y + 1f; // Maintain height
+            }
         }
         
         // Store the calculated world position for shooting
         currentAimWorldPosition = targetWorldPosition;
         
         // Now, convert the world position to screen position to place the UI crosshair
-        Vector3 screenPosition = mainCamera.WorldToScreenPoint(targetWorldPosition);
+        Vector3 screenPosition = mainCamera.WorldToScreenPoint(currentAimWorldPosition);
         
         // Position the UI crosshair
-        // Assuming the UI crosshair prefab is a RectTransform and the canvas is set up correctly
-        if (crosshairInstance.transform is RectTransform)
+        if (uiCanvas != null && crosshairInstance.transform is RectTransform)
         {
              RectTransform canvasRect = uiCanvas.GetComponent<RectTransform>();
-             Vector2 viewportPosition = mainCamera.WorldToViewportPoint(targetWorldPosition);
-             Vector2 canvasPosition = new Vector2(
-                 ((viewportPosition.x * canvasRect.sizeDelta.x) - (canvasRect.sizeDelta.x * 0.5f)),
-                 ((viewportPosition.y * canvasRect.sizeDelta.y) - (canvasRect.sizeDelta.y * 0.5f)));
-             
+             Vector2 canvasPosition;
+             // Use the screen position directly for the UI crosshair
+             RectTransformUtility.ScreenPointToLocalPointInRectangle(canvasRect, screenPosition, mainCamera, out canvasPosition);
              crosshairInstance.GetComponent<RectTransform>().anchoredPosition = canvasPosition;
         }
-        else
-        {
-            // Fallback for non-RectTransform UI elements (less common)
-            // This might not position it correctly depending on UI setup
-            crosshairInstance.transform.position = screenPosition;
-        }
 
-        // Make player face the crosshair direction (based on the calculated world position)
-        Vector3 lookDirection = (currentAimWorldPosition - transform.position).normalized;
-        transform.rotation = Quaternion.LookRotation(new Vector3(lookDirection.x, 0, lookDirection.z));
+        // Handle player sprite flipping based on aim direction (relative to camera)
+        if (playerController != null && Camera.main != null)
+        {
+            // Determine if aim point is left or right of the player in screen space
+            Vector3 screenPointToAim = mainCamera.WorldToScreenPoint(currentAimWorldPosition);
+            Vector3 screenPointPlayer = mainCamera.WorldToScreenPoint(transform.position);
+
+            bool shouldFaceLeft = (screenPointToAim.x < screenPointPlayer.x);
+
+            playerController.SetFacingLeft(shouldFaceLeft); // Call method in PlayerController
+        }
     }
 
     private void Shoot()
@@ -243,49 +274,37 @@ public class PlayerKill : NetworkBehaviour
             StartCoroutine(ResetAimStateAfterShoot());
         }
         
-        // Check if crosshair is over an NPC
-        if (crosshairInstance != null)
+        // Check if crosshair is over an NPC using the calculated world position
+        // The raycast should originate from the player and go towards the currentAimWorldPosition
+        Vector3 rayStart = transform.position + Vector3.up; // Start from player's chest height
+        Vector3 rayDirection = (currentAimWorldPosition - rayStart).normalized;
+        
+        Debug.DrawRay(rayStart, rayDirection * aimRange, Color.red, 2f); // Draw ray in scene view
+        Debug.Log($"Shooting ray from {rayStart} with direction {rayDirection} and range {aimRange}");
+
+        RaycastHit hit;
+        if (Physics.Raycast(rayStart, rayDirection, out hit, aimRange, npcLayerMask))
         {
-            // Cast a ray from the camera through the UI crosshair's screen position
-            Camera mainCamera = Camera.main;
-            if (mainCamera == null) return;
-
-            // Use the stored world position for the raycast origin and direction from player
-            Vector3 rayStart = transform.position + Vector3.up; // Start from player's chest height
-            Vector3 rayDirection = (currentAimWorldPosition - rayStart).normalized;
-            
-            Debug.DrawRay(rayStart, rayDirection * aimRange, Color.yellow, 1f); // Draw ray in scene view
-            Debug.Log($"Shooting ray from {rayStart} with direction {rayDirection} and range {aimRange}");
-
-            RaycastHit hit;
-            if (Physics.Raycast(rayStart, rayDirection, out hit, aimRange, npcLayerMask))
+            Debug.Log($"Raycast hit: {hit.collider.name} at {hit.point}. Hit object layer: {LayerMask.LayerToName(hit.collider.gameObject.layer)}");
+            NPCController npc = hit.collider.GetComponent<NPCController>();
+            if (npc != null)
             {
-                Debug.Log($"Raycast hit: {hit.collider.name} at {hit.point}");
-                NPCController npc = hit.collider.GetComponent<NPCController>();
-                if (npc != null)
-                {
-                    Debug.Log($"Shot hit NPC: {npc.name}");
-                    
-                    // Initiate kill on server
-                    InitiateRangedKillServerRpc(npc.NetworkObject);
-                }
-                else
-                {
-                    Debug.Log("Raycast hit something, but it's not an NPC with NPCController.");
-                }
+                Debug.Log($"Shot hit NPC: {npc.name}. Initiating kill.");
+                
+                // Initiate kill on server
+                InitiateRangedKillServerRpc(npc.NetworkObject);
             }
             else
             {
-                Debug.Log("Shot missed: Raycast did not hit anything.");
+                Debug.Log("Raycast hit something, but it's not an NPC with NPCController.");
             }
         }
         else
         {
-             Debug.LogWarning("PlayerKill: Shoot called but crosshairInstance is null. Cannot perform raycast.");
+            Debug.Log("Shot missed: Raycast did not hit anything.");
         }
         
-        // Exit aim mode immediately after shot (will be replaced by coroutine)
-        // ExitAimMode(); // REMOVED
+        // Aim mode exit is handled by ResetAimStateAfterShoot coroutine
     }
 
     private IEnumerator ResetAimStateAfterShoot()
