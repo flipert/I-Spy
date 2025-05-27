@@ -101,6 +101,12 @@ public class CameraFollow : MonoBehaviour
         targetOrthographicSize = initialOrthographicSize;
         currentZoomSpeed = zoomSpeed;
         
+        // Ensure CameraShakeController instance is available (it should be on the same GameObject or accessible)
+        if (CameraShakeController.Instance == null)
+        {
+            Debug.LogWarning("CameraFollow: CameraShakeController.Instance is not available. Camera shake will not work.", this);
+        }
+        
         // If no target is set, try to find the local player
         if (target == null)
         {
@@ -211,7 +217,8 @@ public class CameraFollow : MonoBehaviour
         Debug.Log("CameraFollow: No local player found in this search attempt");
     }
     
-    private void Update()
+    // Change Update to LateUpdate for camera operations
+    void LateUpdate() // Changed from Update to LateUpdate
     {
         // Ensure the camera follows the player: if target is null or not tagged as 'Player', reassign it
         if (target == null || !target.gameObject.CompareTag("Player"))
@@ -251,36 +258,37 @@ public class CameraFollow : MonoBehaviour
         // Handle rotation input from E and Q keys
         HandleRotationInput();
 
-        // Get the target position (with rotation applied)
-        Vector3 targetPosition = GetTargetPosition();
-        
-        // Continue with camera movement logic
+        // Calculate the base target position (follow + rotation)
+        Vector3 baseTargetPosition = GetTargetPosition();
+
+        // Apply follow style to base target position
+        Vector3 finalPosition = baseTargetPosition; // Default for Instant/FixedOffset
+
         switch (followStyle)
         {
-            case FollowStyle.Instant:
-                // Instantly move to the target position
-                transform.position = targetPosition;
-                break;
             case FollowStyle.SmoothFollow:
-                // Smoothly move to the target position using Lerp
-                transform.position = Vector3.Lerp(
-                    transform.position, 
-                    targetPosition, 
+                finalPosition = Vector3.Lerp(
+                    transform.position - (CameraShakeController.Instance != null ? CameraShakeController.Instance.CurrentShakeOffset : Vector3.zero), // Subtract old shake before lerping
+                    baseTargetPosition, 
                     smoothSpeed * Time.deltaTime * 10f);
                 break;
             case FollowStyle.SmoothDamp:
-                // Smoothly move to the target position using SmoothDamp
-                transform.position = Vector3.SmoothDamp(
-                    transform.position, 
-                    targetPosition, 
+                finalPosition = Vector3.SmoothDamp(
+                    transform.position - (CameraShakeController.Instance != null ? CameraShakeController.Instance.CurrentShakeOffset : Vector3.zero), // Subtract old shake
+                    baseTargetPosition, 
                     ref currentVelocity, 
                     positionDamping);
                 break;
-            case FollowStyle.FixedOffset:
-                // Use the rotated offset for fixed offset mode too
-                transform.position = targetPosition;
-                break;
+            // For Instant and FixedOffset, finalPosition is already baseTargetPosition
         }
+
+        // Apply shake if CameraShakeController is available
+        if (CameraShakeController.Instance != null)
+        {
+            finalPosition += CameraShakeController.Instance.CurrentShakeOffset;
+        }
+
+        transform.position = finalPosition;
 
         // Always make the camera look at the target
         // This is simpler and works better with the orbital rotation

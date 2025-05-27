@@ -30,6 +30,16 @@ public class PlayerKill : NetworkBehaviour
     [Tooltip("Zoom speed for melee kill cinematic.")]
     [SerializeField] private float meleeKillZoomSpeed = 2f;
 
+    [Header("Camera Shake Settings (Local Player)")] // New Header
+    [Tooltip("Duration of camera shake when shooting.")]
+    [SerializeField] private float shootShakeDuration = 0.2f;
+    [Tooltip("Magnitude of camera shake when shooting.")]
+    [SerializeField] private float shootShakeMagnitude = 0.1f;
+    [Tooltip("Duration of camera shake during melee attack.")]
+    [SerializeField] private float meleeImpactShakeDuration = 0.25f;
+    [Tooltip("Magnitude of camera shake during melee attack.")]
+    [SerializeField] private float meleeImpactShakeMagnitude = 0.15f;
+
     [Header("References")]
     [SerializeField] private Animator playerAnimator; // Assign your player's animator
     private PlayerController playerController; // Reference to PlayerController
@@ -814,5 +824,24 @@ public class PlayerKill : NetworkBehaviour
                 Debug.Log($"PlayerKill: Successfully found UI Canvas in FindUICanvas: {uiCanvas.name}. RenderMode: {uiCanvas.renderMode}, ScaleFactor: {uiCanvas.scaleFactor}");
             }
          }
+    }
+
+    // --- Public methods for Animation Events to trigger camera shake ---
+    public void AnimationEvent_TriggerShootShake()
+    {
+        if (IsOwner && CameraShakeController.Instance != null)
+        {
+            Debug.Log("PlayerKill: AnimationEvent_TriggerShootShake called by owner.");
+            CameraShakeController.Instance.TriggerShake(shootShakeDuration, shootShakeMagnitude);
+        }
+    }
+
+    public void AnimationEvent_TriggerMeleeImpactShake()
+    {
+        if (IsOwner && CameraShakeController.Instance != null)
+        {
+            Debug.Log("PlayerKill: AnimationEvent_TriggerMeleeImpactShake called by owner.");
+            CameraShakeController.Instance.TriggerShake(meleeImpactShakeDuration, meleeImpactShakeMagnitude);
+        }
     }
 } 

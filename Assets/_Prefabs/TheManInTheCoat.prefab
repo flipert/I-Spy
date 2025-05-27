@@ -242,7 +242,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d5a57f767e5e46a458fc5d3c628d0cbb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  GlobalObjectIdHash: 677228901
+  GlobalObjectIdHash: 2294059672
   InScenePlacedSourceGlobalObjectIdHash: 677228901
   AlwaysReplicateAsRoot: 0
   SynchronizeTransform: 1
@@ -349,6 +349,10 @@ MonoBehaviour:
   rangedKillZoomSpeed: 3
   meleeKillZoomTargetSize: 1.4
   meleeKillZoomSpeed: 3
+  shootShakeDuration: 0.2
+  shootShakeMagnitude: 0.08
+  meleeImpactShakeDuration: 0.2
+  meleeImpactShakeMagnitude: 0.08
   playerAnimator: {fileID: 3879874863887253514}
 --- !u!1 &6451389695068673682
 GameObject:
