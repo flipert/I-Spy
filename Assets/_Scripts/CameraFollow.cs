@@ -46,8 +46,10 @@ public class CameraFollow : MonoBehaviour
     public float rotationSpeed = 5f;
     
     [Header("Cinematic Zoom Settings")]
-    [Tooltip("Orthographic size when zoomed in for cinematic effect.")]
-    public float zoomedInOrthographicSize = 3f;
+    [Tooltip("Orthographic size when zoomed in for RANGED cinematic effect.")]
+    public float rangedZoomInOrthographicSize = 3f;
+    [Tooltip("Orthographic size when zoomed out for MELEE cinematic effect.")]
+    public float meleeZoomOutOrthographicSize = 7f;
     [Tooltip("How quickly the camera zooms in and out.")]
     public float zoomSpeed = 2f;
     
@@ -61,6 +63,7 @@ public class CameraFollow : MonoBehaviour
     private Camera cameraComponent;
     private float initialOrthographicSize;
     private float targetOrthographicSize;
+    private float currentZoomSpeed;
     
     // Enum for different follow styles
     public enum FollowStyle
@@ -96,6 +99,7 @@ public class CameraFollow : MonoBehaviour
             Debug.Log($"CameraFollow: Initial orthographic size: {initialOrthographicSize}");
         }
         targetOrthographicSize = initialOrthographicSize;
+        currentZoomSpeed = zoomSpeed;
         
         // If no target is set, try to find the local player
         if (target == null)
@@ -236,7 +240,7 @@ public class CameraFollow : MonoBehaviour
         {
             if (Mathf.Abs(cameraComponent.orthographicSize - targetOrthographicSize) > 0.01f)
             {
-                cameraComponent.orthographicSize = Mathf.Lerp(cameraComponent.orthographicSize, targetOrthographicSize, Time.deltaTime * zoomSpeed);
+                cameraComponent.orthographicSize = Mathf.Lerp(cameraComponent.orthographicSize, targetOrthographicSize, Time.deltaTime * currentZoomSpeed);
             }
             else
             {
@@ -451,12 +455,13 @@ public class CameraFollow : MonoBehaviour
     }
 
     // --- New Public Methods for Cinematic Zoom ---
-    public void StartCinematicZoom()
+    public void StartCinematicZoom(float customTargetSize, float customZoomSpeed)
     {
         if (cameraComponent != null && cameraComponent.orthographic)
         {
-            targetOrthographicSize = zoomedInOrthographicSize;
-            Debug.Log($"CameraFollow: Starting cinematic zoom. Target size: {targetOrthographicSize}");
+            targetOrthographicSize = customTargetSize;
+            currentZoomSpeed = customZoomSpeed;
+            Debug.Log($"CameraFollow: Starting cinematic zoom. Target size: {targetOrthographicSize}, Speed: {currentZoomSpeed}");
         }
         else
         {
@@ -464,16 +469,17 @@ public class CameraFollow : MonoBehaviour
         }
     }
 
-    public void EndCinematicZoom()
+    public void ResetCinematicZoom()
     {
         if (cameraComponent != null && cameraComponent.orthographic)
         {
             targetOrthographicSize = initialOrthographicSize;
-            Debug.Log($"CameraFollow: Ending cinematic zoom. Target size: {targetOrthographicSize}");
+            currentZoomSpeed = zoomSpeed;
+            Debug.Log($"CameraFollow: Resetting cinematic zoom. Target size: {targetOrthographicSize}, Speed: {currentZoomSpeed}");
         }
         else
-        { 
-            Debug.LogWarning("CameraFollow: Cannot end cinematic zoom. Camera component missing or not orthographic.");
+        {
+            Debug.LogWarning("CameraFollow: Cannot reset cinematic zoom. Camera component missing or not orthographic.");
         }
     }
 }

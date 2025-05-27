@@ -67,7 +67,7 @@ public class CinematicEffectsController : MonoBehaviour
 
     /// <summary>
     /// Activates the cinematic frame and plays the 'In' animation.
-    /// The 'In' animation should automatically transition to an 'Idle' state.
+    /// This version does NOT handle camera zoom. Use ShowCinematicBarsAndZoom for that.
     /// </summary>
     public void ShowCinematicBars()
     {
@@ -83,18 +83,42 @@ public class CinematicEffectsController : MonoBehaviour
             activeCoroutine = null;
         }
 
-        Debug.Log("CinematicEffectsController: Showing cinematic bars.");
+        Debug.Log("CinematicEffectsController: Showing cinematic bars (no zoom).");
+        cinematicFrameObject.SetActive(true);
+        // The Animator's default state or an 'Entry' transition should handle playing 'CinematicFrameIn'
+    }
+
+    /// <summary>
+    /// Activates the cinematic frame, plays the 'In' animation, and initiates a camera zoom.
+    /// </summary>
+    /// <param name="targetZoomSize">The orthographic size the camera should zoom to.</param>
+    /// <param name="customZoomSpeed">The speed at which the camera should zoom for this specific effect.</param>
+    public void ShowCinematicBarsAndZoom(float targetZoomSize, float customZoomSpeed)
+    {
+        if (cinematicFrameObject == null || cinematicFrameAnimator == null)
+        {
+            Debug.LogWarning("CinematicEffectsController: Cannot show bars and zoom, essential references are missing.", this);
+            return;
+        }
+
+        if (activeCoroutine != null)
+        {
+            StopCoroutine(activeCoroutine);
+            activeCoroutine = null;
+            // If an active coroutine was stopped (likely from a previous HideCinematicBars), 
+            // ensure the zoom is reset before starting a new one.
+            if (mainCameraFollow != null) mainCameraFollow.ResetCinematicZoom();
+        }
+
+        Debug.Log($"CinematicEffectsController: Showing cinematic bars and zooming to {targetZoomSize} with speed {customZoomSpeed}.");
         cinematicFrameObject.SetActive(true);
 
         // Start camera zoom
         if (mainCameraFollow != null)
         {
-            mainCameraFollow.StartCinematicZoom();
+            mainCameraFollow.StartCinematicZoom(targetZoomSize, customZoomSpeed);
         }
-
         // The Animator's default state or an 'Entry' transition should handle playing 'CinematicFrameIn'
-        // If 'CinematicFrameIn' isn't playing automatically, you might need to reset the animator or play the state explicitly:
-        // cinematicFrameAnimator.Play("CinematicFrameIn", 0, 0f); // Or your 'In' state name
     }
 
     /// <summary>
@@ -117,7 +141,7 @@ public class CinematicEffectsController : MonoBehaviour
         // Start camera zoom out *before* triggering the animation
         if (mainCameraFollow != null)
         {
-            mainCameraFollow.EndCinematicZoom();
+            mainCameraFollow.ResetCinematicZoom();
         }
 
         if (activeCoroutine != null)

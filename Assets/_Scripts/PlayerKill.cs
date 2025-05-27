@@ -20,6 +20,16 @@ public class PlayerKill : NetworkBehaviour
     [SerializeField] private float defaultShootAnimationDuration = 0.5f; // Fallback duration
     [SerializeField] private float mouseSensitivity = 3.0f; // Increased sensitivity (might not be needed for direct follow)
 
+    [Header("Cinematic Effect Settings")] // New Header
+    [Tooltip("Target orthographic camera size for ranged kill cinematic.")]
+    [SerializeField] private float rangedKillZoomTargetSize = 3f;
+    [Tooltip("Zoom speed for ranged kill cinematic.")]
+    [SerializeField] private float rangedKillZoomSpeed = 2f;
+    [Tooltip("Target orthographic camera size for melee kill cinematic.")]
+    [SerializeField] private float meleeKillZoomTargetSize = 7f;
+    [Tooltip("Zoom speed for melee kill cinematic.")]
+    [SerializeField] private float meleeKillZoomSpeed = 2f;
+
     [Header("References")]
     [SerializeField] private Animator playerAnimator; // Assign your player's animator
     private PlayerController playerController; // Reference to PlayerController
@@ -211,10 +221,27 @@ public class PlayerKill : NetworkBehaviour
             playerAnimator.SetBool("isAiming", true);
         }
         
-        // Show cinematic bars
-        if (CinematicEffectsController.Instance != null) // Use Singleton instance
+        // Show cinematic bars and zoom in for ranged
+        if (CinematicEffectsController.Instance != null)
         {
-            CinematicEffectsController.Instance.ShowCinematicBars(); // Use Singleton instance
+            if (Camera.main != null)
+            {
+                CameraFollow cameraFollow = Camera.main.GetComponent<CameraFollow>();
+                if (cameraFollow != null)
+                {
+                    CinematicEffectsController.Instance.ShowCinematicBarsAndZoom(rangedKillZoomTargetSize, rangedKillZoomSpeed);
+                }
+                else
+                {
+                    CinematicEffectsController.Instance.ShowCinematicBars(); // Fallback if no CameraFollow
+                    Debug.LogWarning("PlayerKill: CameraFollow not found on Main Camera when entering aim mode. Showing bars without zoom.");
+                }
+            }
+            else
+            {
+                CinematicEffectsController.Instance.ShowCinematicBars(); // Fallback if no Main Camera
+                 Debug.LogWarning("PlayerKill: Main Camera not found when entering aim mode. Showing bars without zoom.");
+            }
         }
         
         Debug.Log("Entered aim mode");
@@ -638,6 +665,29 @@ public class PlayerKill : NetworkBehaviour
         {
             Debug.Log($"Kill input detected for target: {currentTargetNPC.name}");
             
+            // Show cinematic bars and zoom out for melee
+            if (CinematicEffectsController.Instance != null)
+            {
+                if (Camera.main != null)
+                {
+                    CameraFollow cameraFollow = Camera.main.GetComponent<CameraFollow>();
+                    if (cameraFollow != null)
+                    {
+                        CinematicEffectsController.Instance.ShowCinematicBarsAndZoom(meleeKillZoomTargetSize, meleeKillZoomSpeed);
+                    }
+                    else
+                    {
+                        CinematicEffectsController.Instance.ShowCinematicBars(); // Fallback if no CameraFollow
+                        Debug.LogWarning("PlayerKill: CameraFollow not found on Main Camera for melee. Showing bars without zoom.");
+                    }
+                }
+                else
+                {
+                    CinematicEffectsController.Instance.ShowCinematicBars(); // Fallback if no Main Camera
+                    Debug.LogWarning("PlayerKill: Main Camera not found for melee. Showing bars without zoom.");
+                }
+            }
+            
             if (playerAnimator != null)
             {
                 // Check if the Kill trigger exists
@@ -697,6 +747,12 @@ public class PlayerKill : NetworkBehaviour
         Debug.Log("Player kill animation complete, resetting state");
         isPerformingKill = false;
         IsKillAnimationPlaying = false; // Reset flag here
+
+        // Hide cinematic bars and reset zoom after melee kill animation
+        if (CinematicEffectsController.Instance != null)
+        {
+            CinematicEffectsController.Instance.HideCinematicBars();
+        }
     }
 
     [ServerRpc(RequireOwnership = true)]
