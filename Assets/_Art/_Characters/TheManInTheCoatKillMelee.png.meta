@@ -1,5 +1,5 @@
 fileFormatVersion: 2
-guid: b633ca73e59174114815bf06d61bc827
+guid: 2276241a1b4ef4ae09ac5b10d9249f53
 TextureImporter:
   internalIDToNameTable: []
   externalObjects: {}
@@ -137,8 +137,8 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: 0
       bones: []
-      spriteID: 80d925b99c23a46aca15cccec52260f0
-      internalID: -2018496303
+      spriteID: 816c79ff6ec41474f880dabb839eba8e
+      internalID: 1122432909
       vertices: []
       indices: 
       edges: []
@@ -158,8 +158,8 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: 0
       bones: []
-      spriteID: 157c5eeb298b44c31af3e1ed1959704e
-      internalID: 1591628779
+      spriteID: 1ee16161b862d4f7fb10d79c5eb62abb
+      internalID: -353387464
       vertices: []
       indices: 
       edges: []
@@ -179,8 +179,8 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: 0
       bones: []
-      spriteID: 73144e7740eb448f399c985193b8e4c9
-      internalID: -504893207
+      spriteID: 5c488ab427474461f81085a2a906f397
+      internalID: -1979536158
       vertices: []
       indices: 
       edges: []
@@ -200,8 +200,8 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: 0
       bones: []
-      spriteID: b0ce726ed7f5143df9fb5c79c8d9caad
-      internalID: 903592285
+      spriteID: 18fbad7698d60476d84c2306fd328406
+      internalID: 2011893178
       vertices: []
       indices: 
       edges: []
@@ -221,8 +221,8 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: 0
       bones: []
-      spriteID: ec2f0463ff2b3425dbe5482e0b3ec60f
-      internalID: 1799666840
+      spriteID: a64b10cd2f5e246a5ae8a813cffd5da9
+      internalID: 108508685
       vertices: []
       indices: 
       edges: []
@@ -242,8 +242,8 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: 0
       bones: []
-      spriteID: 53e3ed8c5ba1a4dc49b317a61f3b9e79
-      internalID: -364889775
+      spriteID: 657ff4f93c0f84dc7afa013397f86a41
+      internalID: -1065735361
       vertices: []
       indices: 
       edges: []
@@ -263,8 +263,8 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: 0
       bones: []
-      spriteID: 06bd786872d5b41f8a5a7e330d36d229
-      internalID: 965284295
+      spriteID: 574d4b71c270b45649af0fb87b3fea13
+      internalID: 793664510
       vertices: []
       indices: 
       edges: []
@@ -284,8 +284,8 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: 0
       bones: []
-      spriteID: 8009cd818d7264d9c85539ac6d09a5e9
-      internalID: 498336410
+      spriteID: 4b0750ebcf8bc475daf6b78afdf97645
+      internalID: 1327646222
       vertices: []
       indices: 
       edges: []
@@ -293,7 +293,7 @@ TextureImporter:
     outline: []
     physicsShape: []
     bones: []
-    spriteID: 73b7333e88e634668b97a8cf6db9b1f3
+    spriteID: 4e94c6c8b71a146a88cc387e9518e69c
     internalID: 0
     vertices: []
     indices: 
@@ -301,14 +301,14 @@ TextureImporter:
     weights: []
     secondaryTextures: []
     nameFileIdTable:
-      TheManInTheCoatKillMelee_0: -2018496303
-      TheManInTheCoatKillMelee_1: 1591628779
-      TheManInTheCoatKillMelee_2: -504893207
-      TheManInTheCoatKillMelee_3: 903592285
-      TheManInTheCoatKillMelee_4: 1799666840
-      TheManInTheCoatKillMelee_5: -364889775
-      TheManInTheCoatKillMelee_6: 965284295
-      TheManInTheCoatKillMelee_7: 498336410
+      TheManInTheCoatKillMelee_0: 1122432909
+      TheManInTheCoatKillMelee_1: -353387464
+      TheManInTheCoatKillMelee_2: -1979536158
+      TheManInTheCoatKillMelee_3: 2011893178
+      TheManInTheCoatKillMelee_4: 108508685
+      TheManInTheCoatKillMelee_5: -1065735361
+      TheManInTheCoatKillMelee_6: 793664510
+      TheManInTheCoatKillMelee_7: 1327646222
   mipmapLimitGroupName: 
   pSDRemoveMatte: 0
   userData: 
