@@ -415,7 +415,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c1ce118b7058248459335bce5c113da7, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  killRange: 2
+  killRange: 1
   meleeTargetLayerMask:
     serializedVersion: 2
     m_Bits: 1025
@@ -424,19 +424,19 @@ MonoBehaviour:
     m_Bits: 1025
   killKey: 32
   aimKey: 9
-  aimRange: 10
+  aimRange: 6
   crosshairPrefab: {fileID: 8826991618030741413, guid: 54be190b4269e44bfbf8339397c28708, type: 3}
-  shootCooldown: 0.5
-  defaultShootAnimationDuration: 0.5
+  shootCooldown: 0
+  defaultShootAnimationDuration: 0
   mouseSensitivity: 3
   rangedKillZoomTargetSize: 3
-  rangedKillZoomSpeed: 2
-  meleeKillZoomTargetSize: 7
-  meleeKillZoomSpeed: 2
+  rangedKillZoomSpeed: 3
+  meleeKillZoomTargetSize: 1.4
+  meleeKillZoomSpeed: 3
   shootShakeDuration: 0.2
-  shootShakeMagnitude: 0.1
-  meleeImpactShakeDuration: 0.25
-  meleeImpactShakeMagnitude: 0.15
+  shootShakeMagnitude: 0.08
+  meleeImpactShakeDuration: 0.2
+  meleeImpactShakeMagnitude: 0.08
   playerAnimator: {fileID: 5384561374944021589}
 --- !u!1 &8024665826702159164
 GameObject:
