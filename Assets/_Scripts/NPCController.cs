@@ -647,8 +647,11 @@ public class NPCController : NetworkBehaviour
         float deathAnimationDuration = 0f;
         if (npcAnimator != null) {
             RuntimeAnimatorController ac = npcAnimator.runtimeAnimatorController;
-            foreach (AnimationClip clip in ac.animationClips) {
-                if (clip.name.Contains("TheManInTheCoatDeath")) { 
+            foreach (AnimationClip clip in ac.animationClips)
+            {
+                // Look for any clip whose name includes the word "Death" (case-insensitive)
+                if (clip.name.IndexOf("death", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                {
                     deathAnimationDuration = clip.length;
                     Debug.Log($"NPC {gameObject.name}: Found death animation '{clip.name}' with duration: {deathAnimationDuration} for despawn timer.");
                     break;

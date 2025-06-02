@@ -3,23 +3,6 @@ using Unity.Netcode;
 using System.Collections;
 using UnityEngine.UI; // Required for UI elements
 
-/*
- * PlayerKill - Handles player kill mechanics for both melee and ranged attacks
- * 
- * IMPORTANT: Animation Timing
- * This script uses AnimatorStateInfo monitoring instead of fixed durations to properly
- * track when animations finish. This accounts for:
- * - Animator transition times between states
- * - Animation startup delays
- * - Actual animation completion
- * 
- * If you experience delays between pressing kill buttons and animations starting:
- * 1. Check your Animator Controller transition settings
- * 2. Reduce "Exit Time" on transitions (try 0 or very low values)
- * 3. Disable "Has Exit Time" for immediate transitions
- * 4. Reduce "Transition Duration" for snappier transitions
- * 5. Check "Transition Offset" is 0
- */
 public class PlayerKill : NetworkBehaviour
 {
     [Header("Settings")]
@@ -383,18 +366,12 @@ public class PlayerKill : NetworkBehaviour
         IsShootingAnimationPlaying = true; // Set flag for PlayerController
         Debug.Log("PlayerKill: Shoot initiated. Setting isShooting = true and IsShootingAnimationPlaying = true.");
         
-        // Log animator state before triggering
-        LogAnimatorTransitionInfo("Before Shoot Trigger");
-        
         // Trigger shooting animation
         if (playerAnimator != null)
         {
             playerAnimator.SetTrigger("Shoot");
-            // Start coroutine to monitor animation state instead of using fixed duration
-            StartCoroutine(MonitorShootAnimationState());
-            
-            // Log state after trigger
-            StartCoroutine(LogTransitionAfterDelay("After Shoot Trigger", 0.1f));
+            // Start coroutine to reset state after animation
+            StartCoroutine(ResetAimStateAfterShoot());
         }
         
         // Trigger crosshair animation if animator exists
@@ -463,96 +440,72 @@ public class PlayerKill : NetworkBehaviour
             Debug.Log($"Shot missed: Camera Raycast did not hit anything on the {LayerMaskToString(rangedTargetLayerMask)} layers within {cameraRaycastDistance} distance.");
         }
         
-        // Aim mode exit is handled by MonitorShootAnimationState
-    }
-
-    // New coroutine that monitors the actual animation state
-    private IEnumerator MonitorShootAnimationState()
-    {
-        if (playerAnimator == null) yield break;
-        
-        // Wait for the animator to process the trigger and start transitioning
-        yield return null; // Wait one frame
-        
-        // Wait for the shoot animation to actually start playing
-        float timeout = 2f; // Safety timeout
-        float elapsed = 0f;
-        bool shootAnimationStarted = false;
-        
-        while (!shootAnimationStarted && elapsed < timeout)
-        {
-            AnimatorStateInfo stateInfo = playerAnimator.GetCurrentAnimatorStateInfo(0);
-            
-            // Check if we're in a shoot animation state (adjust the state name to match your animator)
-            if (stateInfo.IsName("Shoot") || stateInfo.IsName("TheManInTheCoatShoot") || 
-                playerAnimator.GetCurrentAnimatorClipInfo(0).Length > 0 && 
-                playerAnimator.GetCurrentAnimatorClipInfo(0)[0].clip != null &&
-                playerAnimator.GetCurrentAnimatorClipInfo(0)[0].clip.name.Contains("Shoot"))
-            {
-                shootAnimationStarted = true;
-                Debug.Log($"PlayerKill: Shoot animation started. State: {GetAnimatorStateName(playerAnimator)}");
-            }
-            else if (playerAnimator.IsInTransition(0))
-            {
-                // We're transitioning, which is expected
-                Debug.Log("PlayerKill: Animator is transitioning to shoot state...");
-            }
-            
-            elapsed += Time.deltaTime;
-            yield return null;
-        }
-        
-        if (!shootAnimationStarted)
-        {
-            Debug.LogWarning("PlayerKill: Shoot animation did not start within timeout!");
-        }
-        
-        // Now wait for the animation to actually finish
-        bool animationFinished = false;
-        elapsed = 0f;
-        timeout = 5f; // Longer timeout for animation completion
-        
-        while (!animationFinished && elapsed < timeout)
-        {
-            AnimatorStateInfo stateInfo = playerAnimator.GetCurrentAnimatorStateInfo(0);
-            
-            // Check if we're back to idle or another non-shoot state
-            if (!playerAnimator.IsInTransition(0) && 
-                !stateInfo.IsName("Shoot") && 
-                !stateInfo.IsName("TheManInTheCoatShoot") &&
-                (stateInfo.IsName("Idle") || stateInfo.IsName("MainInCoatIdle") || stateInfo.IsName("Aiming")))
-            {
-                animationFinished = true;
-                Debug.Log($"PlayerKill: Shoot animation finished. Now in state: {GetAnimatorStateName(playerAnimator)}");
-            }
-            
-            elapsed += Time.deltaTime;
-            yield return null;
-        }
-        
-        // Reset shooting state
-        IsShootingAnimationPlaying = false;
-        isPerformingKill = false;
-        IsKillAnimationPlaying = false;
-        Debug.Log("PlayerKill: Shoot animation monitoring complete. Movement re-enabled.");
-        
-        // Handle crosshair animation if needed
-        if (crosshairAnimator != null)
-        {
-            // Wait a bit for crosshair animation
-            yield return new WaitForSeconds(0.5f);
-        }
-        
-        // Exit aim mode
-        ExitAimMode();
+        // Aim mode exit is handled by ResetAimStateAfterShoot coroutine
     }
 
     private IEnumerator ResetAimStateAfterShoot()
     {
-        // This coroutine is now replaced by MonitorShootAnimationState
-        // Keeping it for backwards compatibility but it should not be called
-        Debug.LogWarning("PlayerKill: ResetAimStateAfterShoot called but should use MonitorShootAnimationState instead");
-        yield return null;
+        // Attempt to get player shoot animation duration
+        float playerShootAnimationDuration = defaultShootAnimationDuration;
+        if (playerAnimator != null)
+        {
+            RuntimeAnimatorController ac = playerAnimator.runtimeAnimatorController;
+            if (ac != null)
+            {
+                foreach (AnimationClip clip in ac.animationClips) {
+                    if (clip.name.Contains("Shoot")) { 
+                        playerShootAnimationDuration = clip.length;
+                        Debug.Log($"PlayerKill: Found Shoot animation '{clip.name}' with duration: {playerShootAnimationDuration}");
+                        break;
+                    }
+                }
+                if (playerShootAnimationDuration == 0f) {
+                    Debug.LogWarning("PlayerKill: Could not find Shoot animation clip length, defaulting to 0.5s.");
+                    playerShootAnimationDuration = 0.5f; // Fallback
+                }
+            }
+        }
+        
+        Debug.Log($"Player shoot animation in progress, will complete in {playerShootAnimationDuration} seconds");
+        yield return new WaitForSeconds(playerShootAnimationDuration); // Wait for player anim first
+        Debug.Log("Player shoot animation complete, resetting state");
+
+        // Reset player shooting animation flag after player animation finishes
+        IsShootingAnimationPlaying = false; // Reset flag here
+        Debug.Log("PlayerKill: Player shoot animation finished. Setting IsShootingAnimationPlaying = false.");
+        
+        // Add these lines to ensure animation state is reset after shooting
+        isPerformingKill = false;
+        IsKillAnimationPlaying = false;
+
+        // Now wait for the crosshair "Broken" animation to finish, if an animator exists
+        if (crosshairAnimator != null)
+        {
+            // Find the duration of the "Broken" state/clip
+            float crosshairBreakAnimationDuration = 0f;
+            RuntimeAnimatorController ac = crosshairAnimator.runtimeAnimatorController;
+            if (ac != null)
+            {
+                foreach (AnimationClip clip in ac.animationClips) {
+                    // Assuming the clip name contains "Broken"
+                    if (clip.name.Contains("Broken")) { 
+                        crosshairBreakAnimationDuration = clip.length;
+                        Debug.Log($"PlayerKill: Found Crosshair Break animation '{clip.name}' with duration: {crosshairBreakAnimationDuration}");
+                        break;
+                    }
+                }
+                 if (crosshairBreakAnimationDuration == 0f) {
+                    Debug.LogWarning("PlayerKill: Could not find Crosshair Broken animation clip length, defaulting to 0s. Crosshair will disappear immediately after player anim.");
+                }
+            }
+
+            Debug.Log($"Waiting for crosshair break animation to complete in {crosshairBreakAnimationDuration} seconds");
+            yield return new WaitForSeconds(crosshairBreakAnimationDuration);
+            Debug.Log("Crosshair break animation complete.");
+        }
+
+        // Exit aim mode after the shoot animation and crosshair animation
+        ExitAimMode(); // This will also reset IsAiming = false, destroy crosshair, and reset isShooting and IsShootingAnimationPlaying
     }
 
     [ServerRpc(RequireOwnership = true)]
@@ -761,20 +714,27 @@ public class PlayerKill : NetworkBehaviour
                 
                 Debug.Log($"Player Animator current state BEFORE 'Kill' trigger: {GetAnimatorStateName(playerAnimator)}. Has Kill trigger: {hasKillTrigger}. Setting trigger now.");
                 
-                // Log animator state before triggering
-                LogAnimatorTransitionInfo("Before Kill Trigger");
-                
                 playerAnimator.SetTrigger("Kill");
                 StartCoroutine(CheckAnimationStateAfterTrigger(playerAnimator, "TheManInTheCoatKill", "Kill"));
-                
-                // Log state after trigger
-                StartCoroutine(LogTransitionAfterDelay("After Kill Trigger", 0.1f));
 
                 isPerformingKill = true;
                 IsKillAnimationPlaying = true; // Set flag here
                 
-                // Use the new monitoring coroutine instead of fixed duration
-                StartCoroutine(MonitorMeleeKillAnimationState());
+                float killAnimationDuration = 0f;
+                // Attempt to get kill animation duration
+                RuntimeAnimatorController ac = playerAnimator.runtimeAnimatorController;
+                foreach (AnimationClip clip in ac.animationClips) {
+                    if (clip.name.Contains("TheManInTheCoatKill")) { 
+                        killAnimationDuration = clip.length;
+                        Debug.Log($"PlayerKill: Found Kill animation '{clip.name}' with duration: {killAnimationDuration}");
+                        break;
+                    }
+                }
+                if (killAnimationDuration == 0f) {
+                    Debug.LogWarning("PlayerKill: Could not find Kill animation clip length, defaulting to 1.5s.");
+                    killAnimationDuration = 1.5f; // Fallback
+                }
+                StartCoroutine(ResetKillState(killAnimationDuration));
             }
             else
             {
@@ -790,89 +750,11 @@ public class PlayerKill : NetworkBehaviour
         }
     }
 
-    // New coroutine that monitors the actual melee kill animation state
-    private IEnumerator MonitorMeleeKillAnimationState()
-    {
-        if (playerAnimator == null) yield break;
-        
-        // Wait for the animator to process the trigger and start transitioning
-        yield return null; // Wait one frame
-        
-        // Wait for the kill animation to actually start playing
-        float timeout = 2f; // Safety timeout
-        float elapsed = 0f;
-        bool killAnimationStarted = false;
-        
-        while (!killAnimationStarted && elapsed < timeout)
-        {
-            AnimatorStateInfo stateInfo = playerAnimator.GetCurrentAnimatorStateInfo(0);
-            
-            // Check if we're in a kill animation state
-            if (stateInfo.IsName("Kill") || stateInfo.IsName("TheManInTheCoatKill") || 
-                playerAnimator.GetCurrentAnimatorClipInfo(0).Length > 0 && 
-                playerAnimator.GetCurrentAnimatorClipInfo(0)[0].clip != null &&
-                playerAnimator.GetCurrentAnimatorClipInfo(0)[0].clip.name.Contains("Kill"))
-            {
-                killAnimationStarted = true;
-                Debug.Log($"PlayerKill: Melee kill animation started. State: {GetAnimatorStateName(playerAnimator)}");
-            }
-            else if (playerAnimator.IsInTransition(0))
-            {
-                // We're transitioning, which is expected
-                Debug.Log("PlayerKill: Animator is transitioning to kill state...");
-            }
-            
-            elapsed += Time.deltaTime;
-            yield return null;
-        }
-        
-        if (!killAnimationStarted)
-        {
-            Debug.LogWarning("PlayerKill: Kill animation did not start within timeout!");
-        }
-        
-        // Now wait for the animation to actually finish
-        bool animationFinished = false;
-        elapsed = 0f;
-        timeout = 5f; // Longer timeout for animation completion
-        
-        while (!animationFinished && elapsed < timeout)
-        {
-            AnimatorStateInfo stateInfo = playerAnimator.GetCurrentAnimatorStateInfo(0);
-            
-            // Check if we're back to idle or running state
-            if (!playerAnimator.IsInTransition(0) && 
-                !stateInfo.IsName("Kill") && 
-                !stateInfo.IsName("TheManInTheCoatKill") &&
-                (stateInfo.IsName("Idle") || stateInfo.IsName("MainInCoatIdle") || 
-                 stateInfo.IsName("Run") || stateInfo.IsName("ManInCoatRun")))
-            {
-                animationFinished = true;
-                Debug.Log($"PlayerKill: Melee kill animation finished. Now in state: {GetAnimatorStateName(playerAnimator)}");
-            }
-            
-            elapsed += Time.deltaTime;
-            yield return null;
-        }
-        
-        // Reset kill state
-        Debug.Log("PlayerKill: Melee kill animation complete, resetting state");
-        isPerformingKill = false;
-        IsKillAnimationPlaying = false;
-        
-        // Hide cinematic bars and reset zoom after melee kill animation
-        if (CinematicEffectsController.Instance != null)
-        {
-            CinematicEffectsController.Instance.HideCinematicBars();
-        }
-    }
-
     private System.Collections.IEnumerator ResetKillState(float delay)
     {
-        // This is now only used as a fallback when animator is null
-        Debug.Log($"Player kill animation fallback timer, will complete in {delay} seconds");
+        Debug.Log($"Player kill animation in progress, will complete in {delay} seconds");
         yield return new WaitForSeconds(delay);
-        Debug.Log("Player kill animation fallback complete, resetting state");
+        Debug.Log("Player kill animation complete, resetting state");
         isPerformingKill = false;
         IsKillAnimationPlaying = false; // Reset flag here
 
@@ -961,34 +843,5 @@ public class PlayerKill : NetworkBehaviour
             Debug.Log("PlayerKill: AnimationEvent_TriggerMeleeImpactShake called by owner.");
             CameraShakeController.Instance.TriggerShake(meleeImpactShakeDuration, meleeImpactShakeMagnitude);
         }
-    }
-    
-    // Debug method to log animator transition info
-    private void LogAnimatorTransitionInfo(string context)
-    {
-        if (playerAnimator == null) return;
-        
-        AnimatorStateInfo currentState = playerAnimator.GetCurrentAnimatorStateInfo(0);
-        AnimatorTransitionInfo transitionInfo = playerAnimator.GetAnimatorTransitionInfo(0);
-        
-        if (playerAnimator.IsInTransition(0))
-        {
-            Debug.Log($"[{context}] Animator Transition Info:");
-            Debug.Log($"  - Duration: {transitionInfo.duration}");
-            Debug.Log($"  - Normalized Time: {transitionInfo.normalizedTime}");
-            Debug.Log($"  - Current State: {GetAnimatorStateName(playerAnimator)}");
-            Debug.Log($"  - Has Fixed Duration: {transitionInfo.hasFixedDuration}");
-        }
-        else
-        {
-            Debug.Log($"[{context}] Current State: {GetAnimatorStateName(playerAnimator)} (No active transition)");
-        }
-    }
-
-    // Helper coroutine to log transition info after a delay
-    private IEnumerator LogTransitionAfterDelay(string context, float delay)
-    {
-        yield return new WaitForSeconds(delay);
-        LogAnimatorTransitionInfo(context);
     }
 } 
