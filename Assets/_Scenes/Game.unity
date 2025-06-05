@@ -21531,6 +21531,7 @@ MonoBehaviour:
   npcPrefabs:
   - {fileID: 5964388756769884995, guid: 62f65b684cf684c3783a308e8214fd27, type: 3}
   - {fileID: 5964388756769884995, guid: b9ee9f2a37fbd4d6887071452b1beedf, type: 3}
+  - {fileID: 5964388756769884995, guid: 374032efc3e00472d88c079f03c02a86, type: 3}
   maxNPCCount: 150
   spawnAreaCenter: {x: 3, y: 0, z: 0.57}
   spawnAreaSize: {x: 47, y: 0, z: 28}
