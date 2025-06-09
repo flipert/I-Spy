@@ -2886,7 +2886,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 4143767555005924, guid: 67792c850ef72f842a6388db4d93b9c5, type: 3}
       propertyPath: m_LocalPosition.y
-      value: 0
+      value: -0.06
       objectReference: {fileID: 0}
     - target: {fileID: 4143767555005924, guid: 67792c850ef72f842a6388db4d93b9c5, type: 3}
       propertyPath: m_LocalPosition.z
@@ -19200,10 +19200,10 @@ Camera:
     y: 0
     width: 1
     height: 1
-  near clip plane: -20
+  near clip plane: 0.01
   far clip plane: 1000
   field of view: 60
-  orthographic: 1
+  orthographic: 0
   orthographic size: 1.9
   m_Depth: -1
   m_CullingMask:
@@ -19247,18 +19247,19 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 0291489c04552425bbe2935d2bbaf045, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  target: {fileID: 657204650503495020, guid: 8323979c5d37e47d9867e3d8461d53c8, type: 3}
+  target: {fileID: 0}
   offset: {x: 1.9, y: -0.6, z: -2.8}
   smoothSpeed: 0.1
   lookAtTarget: 1
   followStyle: 3
   positionDamping: 0.3
   rotationDamping: 0
-  fixedHeight: 1
+  fixedHeight: 0
   fixedHeightValue: 10
   topDownFollow: 1
-  rotationAngle: 45
-  rotationSpeed: 5
+  mouseSensitivity: 4
+  invertMouseX: 1
+  rotationSpeed: 15
   rangedZoomInOrthographicSize: 3
   meleeZoomOutOrthographicSize: 7
   zoomSpeed: 2
@@ -37347,7 +37348,7 @@ Transform:
   m_GameObject: {fileID: 1934262080}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 3.8, y: 0, z: 32.5}
+  m_LocalPosition: {x: 3.8, y: -0.55, z: 32.5}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:

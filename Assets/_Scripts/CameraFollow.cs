@@ -39,10 +39,13 @@ public class CameraFollow : MonoBehaviour
     public bool topDownFollow = true;
     
     [Header("Rotation Settings")]
-    [Tooltip("Rotation angle in degrees when pressing E or Q")]
-    public float rotationAngle = 45f;
+    [Tooltip("Mouse sensitivity for camera rotation")]
+    public float mouseSensitivity = 2f;
     
-    [Tooltip("How quickly the camera rotates to the new angle")]
+    [Tooltip("If true, inverts the mouse X axis")]
+    public bool invertMouseX = false;
+    
+    [Tooltip("How quickly the camera rotates")]
     public float rotationSpeed = 5f;
     
     [Header("Cinematic Zoom Settings")]
@@ -362,33 +365,24 @@ public class CameraFollow : MonoBehaviour
         return new Vector3(newX, vector.y, newZ);
     }
     
-    // Handle rotation input from E and Q keys
+    // Handle rotation input from mouse
     private void HandleRotationInput()
     {
-        // Check for Q key (rotate left)
-        if (Input.GetKeyDown(KeyCode.Q))
+        // Get mouse movement
+        float mouseX = Input.GetAxis("Mouse X");
+        
+        // Apply mouse sensitivity and inversion if needed
+        float rotationInput = mouseX * mouseSensitivity;
+        if (invertMouseX)
         {
-            targetRotationAngle -= rotationAngle;
-            Debug.Log($"CameraFollow: Rotating left to {targetRotationAngle} degrees");
+            rotationInput = -rotationInput;
         }
         
-        // Check for E key (rotate right)
-        if (Input.GetKeyDown(KeyCode.E))
-        {
-            targetRotationAngle += rotationAngle;
-            Debug.Log($"CameraFollow: Rotating right to {targetRotationAngle} degrees");
-        }
+        // Update target rotation angle based on mouse input
+        targetRotationAngle += rotationInput;
         
         // Smoothly interpolate to the target rotation angle
-        // Using a stronger interpolation factor to make the rotation more noticeable
-        currentRotationAngle = Mathf.Lerp(currentRotationAngle, targetRotationAngle, Time.deltaTime * rotationSpeed * 2f);
-        
-        // Force an immediate update when the rotation changes significantly
-        if (Mathf.Abs(targetRotationAngle - currentRotationAngle) > 1f)
-        {
-            // This helps ensure the camera position updates right away
-            transform.position = GetTargetPosition();
-        }
+        currentRotationAngle = Mathf.Lerp(currentRotationAngle, targetRotationAngle, Time.deltaTime * rotationSpeed);
     }
     
     // Public method to change the target at runtime
