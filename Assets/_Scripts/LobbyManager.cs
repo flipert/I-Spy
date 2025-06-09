@@ -759,7 +759,7 @@ public class LobbyManager : MonoBehaviour
             try 
             {
                 // Determine the scene to load
-                string sceneToLoad = "backup";
+                string sceneToLoad = "Game";
                 Debug.Log($"Host loading game scene: {sceneToLoad}");
                 
                 // Try to use NetworkSceneManager if possible, otherwise fall back to direct loading

@@ -6,15 +6,12 @@ EditorBuildSettings:
   serializedVersion: 2
   m_Scenes:
   - enabled: 1
-    path: Assets/_Scenes/Game/Splash.unity
-    guid: fc112ec74c2824da1910d7866f56127d
+    path: Assets/_Scenes/Splash.unity
+    guid: b3e4556d2f5f5ce4f8c1304efef46721
   - enabled: 1
-    path: Assets/_Scenes/Game/MainMenu.unity
-    guid: fe2a011cba4f44eccb0e3238c0fc2665
+    path: Assets/_Scenes/MainMenu.unity
+    guid: bfe9c7fe21a678a41992e5be2b9d9814
   - enabled: 1
-    path: Assets/backupv3.unity
-    guid: 5f674f88ab7eeb44a9685a239f657e51
-  - enabled: 1
-    path: Assets/_Scenes/Game/Game.unity
-    guid: 9fc0d4010bbf28b4594072e72b8655ab
+    path: Assets/_Scenes/Game.unity
+    guid: f94bbaba8acd75245b2268ad6a3b596d
   m_configObjects: {}
