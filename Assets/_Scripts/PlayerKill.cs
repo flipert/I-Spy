@@ -42,6 +42,7 @@ public class PlayerKill : NetworkBehaviour
 
     [Header("References")]
     [SerializeField] private Animator playerAnimator; // Assign your player's animator
+    [SerializeField] private Sprite[] characterRangedWeaponSprites; // Assign one sprite per character index
     private PlayerController playerController; // Reference to PlayerController
 
     private NPCController currentTargetNPC;
@@ -88,9 +89,6 @@ public class PlayerKill : NetworkBehaviour
             Debug.LogError("PlayerKill could not find PlayerController component!");
         }
 
-        // Attempt to find Canvas in Start (will also try in Update if needed)
-        FindUICanvas();
-        
         // Automatically set rangedTargetLayerMask to include NPC and Default layers if not set
         if (rangedTargetLayerMask.value == 0)
         {
@@ -365,6 +363,17 @@ public class PlayerKill : NetworkBehaviour
         isShooting = true; // Set flag when shooting starts
         IsShootingAnimationPlaying = true; // Set flag for PlayerController
         Debug.Log("PlayerKill: Shoot initiated. Setting isShooting = true and IsShootingAnimationPlaying = true.");
+        
+        // Trigger HUD Cooldown
+        if (PlayerHUDController.Instance != null)
+        {
+            Debug.Log("PlayerKill: Calling TriggerRangedCooldown on PlayerHUDController.");
+            PlayerHUDController.Instance.TriggerRangedCooldown(shootCooldown);
+        }
+        else
+        {
+            Debug.LogWarning("PlayerKill: PlayerHUDController.Instance is null. Cannot trigger cooldown.");
+        }
         
         // Trigger shooting animation
         if (playerAnimator != null)
@@ -842,6 +851,27 @@ public class PlayerKill : NetworkBehaviour
         {
             Debug.Log("PlayerKill: AnimationEvent_TriggerMeleeImpactShake called by owner.");
             CameraShakeController.Instance.TriggerShake(meleeImpactShakeDuration, meleeImpactShakeMagnitude);
+        }
+    }
+
+    public void UpdateWeaponIcon(int charIndex)
+    {
+        if (PlayerHUDController.Instance != null)
+        {
+            if (characterRangedWeaponSprites != null && charIndex >= 0 && charIndex < characterRangedWeaponSprites.Length)
+            {
+                Sprite weaponSprite = characterRangedWeaponSprites[charIndex];
+                Debug.Log($"PlayerKill: Setting HUD weapon icon for character index {charIndex}.");
+                PlayerHUDController.Instance.SetRangedWeaponIcon(weaponSprite);
+            }
+            else
+            {
+                Debug.LogWarning($"PlayerKill: Could not set weapon icon. Invalid character index ({charIndex}) or characterRangedWeaponSprites array not set up correctly.");
+            }
+        }
+        else
+        {
+            Debug.LogWarning("PlayerKill: PlayerHUDController.Instance is null. Cannot update weapon icon.");
         }
     }
 } 

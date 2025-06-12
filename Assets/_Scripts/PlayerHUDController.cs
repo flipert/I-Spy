@@ -11,6 +11,9 @@ public class PlayerHUDController : MonoBehaviour
     [SerializeField] private Sprite[] characterProfileSprites; // Array of profile pictures for each character
     [SerializeField] private Sprite genericPursuerSprite; // Generic sprite for pursuers
     
+    [Header("Arsenal Display Settings")]
+    private ArsenalIconController rangedWeaponIcon;
+    
     // UI References - found by tags in Initialize()
     private Image targetProfileImage;
     private GameObject targetLoadingIndicator;
@@ -41,6 +44,8 @@ public class PlayerHUDController : MonoBehaviour
     public void Initialize()
     {
         if (initialized) return;
+        
+        Debug.Log($"PlayerHUDController: Initializing... Instance ID: {GetInstanceID()}");
         
         // Find the target profile image
         GameObject targetProfileObj = GameObject.FindGameObjectWithTag("TargetProfileImage");
@@ -93,6 +98,21 @@ public class PlayerHUDController : MonoBehaviour
             {
                 Debug.LogWarning($"PlayerHUDController: Could not find GameObject with tag 'PursuerSlot{i+1}'!");
             }
+        }
+        
+        // Find the arsenal icons
+        GameObject rangedIconObj = GameObject.FindGameObjectWithTag("RangedWeaponIcon");
+        if (rangedIconObj != null)
+        {
+            rangedWeaponIcon = rangedIconObj.GetComponent<ArsenalIconController>();
+            if (rangedWeaponIcon == null)
+            {
+                Debug.LogError("PlayerHUDController: RangedWeaponIcon tag found but object has no ArsenalIconController component!");
+            }
+        }
+        else
+        {
+            Debug.LogWarning("PlayerHUDController: Could not find GameObject with tag 'RangedWeaponIcon'. This is optional.");
         }
         
         Debug.Log("PlayerHUDController: Initialized HUD elements");
@@ -254,5 +274,33 @@ public class PlayerHUDController : MonoBehaviour
         }
         
         Debug.Log($"PlayerHUDController: Updated pursuer display with {count} pursuers");
+    }
+
+    // --- Arsenal Methods ---
+    
+    public void SetRangedWeaponIcon(Sprite icon)
+    {
+        if (!initialized || rangedWeaponIcon == null) return;
+
+        if (icon != null)
+        {
+            rangedWeaponIcon.SetIcon(icon);
+        }
+        else
+        {
+            Debug.LogWarning("PlayerHUDController: Tried to set ranged weapon icon with a null sprite.");
+        }
+    }
+
+    public void TriggerRangedCooldown(float duration)
+    {
+        if (!initialized || rangedWeaponIcon == null)
+        {
+            Debug.LogWarning($"PlayerHUDController: Cannot trigger cooldown. Initialized: {initialized}, RangedWeaponIcon is null: {rangedWeaponIcon == null}");
+            return;
+        }
+        
+        Debug.Log("PlayerHUDController: Triggering cooldown on ArsenalIconController.");
+        rangedWeaponIcon.StartCooldown(duration);
     }
 } 

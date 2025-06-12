@@ -338,11 +338,11 @@ MonoBehaviour:
   rangedTargetLayerMask:
     serializedVersion: 2
     m_Bits: 1025
-  killKey: 32
+  killKey: 101
   aimKey: 9
   aimRange: 6
   crosshairPrefab: {fileID: 8826991618030741413, guid: 54be190b4269e44bfbf8339397c28708, type: 3}
-  shootCooldown: 0
+  shootCooldown: 10
   defaultShootAnimationDuration: 0
   mouseSensitivity: 3
   rangedKillZoomTargetSize: 3
@@ -354,6 +354,8 @@ MonoBehaviour:
   meleeImpactShakeDuration: 0.2
   meleeImpactShakeMagnitude: 0.08
   playerAnimator: {fileID: 3879874863887253514}
+  characterRangedWeaponSprites:
+  - {fileID: -1597666299, guid: 48875096cc3d84cadba4ac60fd0025e7, type: 3}
 --- !u!1 &6451389695068673682
 GameObject:
   m_ObjectHideFlags: 0

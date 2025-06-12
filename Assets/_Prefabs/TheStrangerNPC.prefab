@@ -381,7 +381,7 @@ MonoBehaviour:
   assignedColorIndex: -1
   characterSpriteRenderer: {fileID: 0}
   npcAnimator: {fileID: 1499080134611932573}
-  killPromptIcon: {fileID: 6807813226469921546, guid: b9ee9f2a37fbd4d6887071452b1beedf, type: 3}
+  killPromptIcon: {fileID: 2577615490312606664}
 --- !u!114 &6122684278062098455
 MonoBehaviour:
   m_ObjectHideFlags: 0

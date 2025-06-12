@@ -43,21 +43,22 @@ public class PlayerController : NetworkBehaviour
     private Rigidbody rb; // Add Rigidbody reference
 
     // This could be used to identify which character type this player is
-    public int characterIndex { get; private set; } = 0;
+    public NetworkVariable<int> characterIndex = new NetworkVariable<int>(0, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
+    private PlayerKill playerKill;
 
-    void Start()
+    // Public method to get the character index
+    public int GetCharacterIndex()
     {
-        // Check if this is the local player
-        isLocalPlayer = IsOwner;
-        
-        // Initialize stamina
-        currentStamina = maxStamina;
-        canSprint = true;
+        return characterIndex.Value;
+    }
 
-        // Get the Animator on the same GameObject
+    void Awake()
+    {
+        // Get components early
         animator = GetComponent<Animator>();
-        rb = GetComponent<Rigidbody>(); // Get the Rigidbody component
-
+        rb = GetComponent<Rigidbody>();
+        playerKill = GetComponent<PlayerKill>();
+        
         // Get the child named "Character" for flipping sprite
         Transform characterTransform = transform.Find("Character");
         if (characterTransform != null)
@@ -68,10 +69,17 @@ public class PlayerController : NetworkBehaviour
         {
             Debug.LogError("Child 'Character' not found. Please ensure your player has a child named 'Character' with a SpriteRenderer.");
         }
+    }
 
-        // Make sure stamina bar is full at start - Will be updated in OnNetworkSpawn for local player
-        // UpdateStaminaBar(); // Moved to OnNetworkSpawn
+    void Start()
+    {
+        // Check if this is the local player
+        isLocalPlayer = IsOwner;
         
+        // Initialize stamina
+        currentStamina = maxStamina;
+        canSprint = true;
+
         // Debug log for network ownership
         Debug.Log($"Player initialized. IsOwner: {IsOwner}, NetworkObjectId: {NetworkObjectId}");
     }
@@ -400,10 +408,16 @@ public class PlayerController : NetworkBehaviour
         //     pursuersIds = new NetworkList<ulong>();
         // }
 
+        // Subscribe to network variable changes
+        characterIndex.OnValueChanged += OnCharacterIndexChanged;
+
         // If this is the local player, find the camera and assign ourselves as the target AND find the HUD elements
         if (IsOwner)
         {
             Debug.Log($"PlayerController: Local player spawned at {transform.position}");
+            
+            // Manually trigger the icon update for the initial value, since OnValueChanged only triggers on change.
+            OnCharacterIndexChanged(0, characterIndex.Value);
             
             // Find the main camera and set its target to this player
             CameraFollow cameraFollow = Camera.main?.GetComponent<CameraFollow>();
@@ -480,7 +494,7 @@ public class PlayerController : NetworkBehaviour
             // Get the character index from NetworkManagerUI if available
             if (NetworkManagerUI.Instance != null)
             {
-                characterIndex = NetworkManagerUI.Instance.GetClientCharacterIndex(OwnerClientId);
+                characterIndex.Value = NetworkManagerUI.Instance.GetClientCharacterIndex(OwnerClientId);
             }
 
             // Register with GameManager
@@ -553,12 +567,32 @@ public class PlayerController : NetworkBehaviour
             currentTargetId.OnValueChanged -= OnTargetChanged;
         }
         
+        if (characterIndex != null)
+        {
+            characterIndex.OnValueChanged -= OnCharacterIndexChanged;
+        }
+        
         if (pursuersIds != null)
         {
             pursuersIds.OnListChanged -= OnPursuersChanged;
         }
 
         // Clean up other callbacks or references as needed
+    }
+
+    private void OnCharacterIndexChanged(int previousValue, int newValue)
+    {
+        // Only the owner should update their HUD.
+        if (!IsOwner) return;
+
+        if (playerKill == null)
+        {
+            Debug.LogError("PlayerController could not find the PlayerKill component to update the weapon icon!");
+            return;
+        }
+    
+        Debug.Log($"OnCharacterIndexChanged: new index is {newValue}. Updating weapon icon.");
+        playerKill.UpdateWeaponIcon(newValue);
     }
 
     // Called on all clients when the current target changes
@@ -585,7 +619,7 @@ public class PlayerController : NetworkBehaviour
                 PlayerController targetPlayer = GetPlayerByNetworkId(newTarget);
                 if (targetPlayer != null)
                 {
-                    int targetCharacterIndex = targetPlayer.characterIndex;
+                    int targetCharacterIndex = targetPlayer.characterIndex.Value;
                     hudController.SetTargetCharacter(targetCharacterIndex);
                 }
                 else
