@@ -269,6 +269,9 @@ MonoBehaviour:
   staminaDepletionRate: 3
   staminaRegenRate: 2
   minStaminaToSprint: 4
+  hudPrefab: {fileID: 976655548402092960, guid: 3e719dfd498f245b9a75ed224ecb3920, type: 3}
+  characterIndex:
+    m_InternalValue: 0
 --- !u!136 &2109716159598790390
 CapsuleCollider:
   m_ObjectHideFlags: 0

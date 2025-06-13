@@ -1,5 +1,6 @@
 using UnityEngine;
 using Unity.Netcode;
+using UnityEngine.SceneManagement;
 
 public class PlayerController : NetworkBehaviour
 {
@@ -31,6 +32,7 @@ public class PlayerController : NetworkBehaviour
 
     // Reference to the HUD controller
     private PlayerHUDController hudController;
+    public GameObject hudPrefab; // Assign your PlayerHUD prefab in the inspector
 
     private float currentStamina;
     private bool canSprint = true;          // Track if player can start sprinting
@@ -411,81 +413,12 @@ public class PlayerController : NetworkBehaviour
         // Subscribe to network variable changes
         characterIndex.OnValueChanged += OnCharacterIndexChanged;
 
-        // If this is the local player, find the camera and assign ourselves as the target AND find the HUD elements
+        // If this is the local player, we need to wait for the correct scene to load before setting up the UI.
         if (IsOwner)
         {
-            Debug.Log($"PlayerController: Local player spawned at {transform.position}");
-            
-            // Manually trigger the icon update for the initial value, since OnValueChanged only triggers on change.
-            OnCharacterIndexChanged(0, characterIndex.Value);
-            
-            // Find the main camera and set its target to this player
-            CameraFollow cameraFollow = Camera.main?.GetComponent<CameraFollow>();
-            if (cameraFollow != null)
-            {
-                Debug.Log("PlayerController: Found CameraFollow, setting target");
-                cameraFollow.SetTarget(transform);
-                cameraFollow.ResetCameraPosition();
-            }
-            else
-            {
-                Debug.LogWarning("PlayerController: Could not find CameraFollow component on main camera");
-            }
-
-            // Find the stamina bar UI element in the scene using its tag
-            GameObject staminaBarObject = GameObject.FindGameObjectWithTag("StaminaBarFill"); // Make sure this tag exists and is assigned in the scene
-            if (staminaBarObject != null)
-            {
-                staminaBarFill = staminaBarObject.GetComponent<RectTransform>();
-                if (staminaBarFill != null)
-                {
-                    Debug.Log("PlayerController: Found and assigned StaminaBarFill RectTransform.");
-                    // Initialize the bar state correctly now that we found it
-                    UpdateStaminaBar();
-                }
-                else
-                {
-                    Debug.LogError("PlayerController: Found GameObject with tag 'StaminaBarFill', but it lacks a RectTransform component.");
-                }
-            }
-            else
-            {
-                Debug.LogWarning("PlayerController: Could not find GameObject with tag 'StaminaBarFill'. Make sure the UI element exists in the scene and has the correct tag.");
-            }
-
-            // Find and setup the HUD controller
-            hudController = FindObjectOfType<PlayerHUDController>();
-            if (hudController == null)
-            {
-                Debug.Log("PlayerController: Attempting to create PlayerHUDController since it wasn't found in the scene");
-                
-                // Try to instantiate PlayerHUDController from prefab
-                try {
-                    GameObject hudPrefab = Resources.Load<GameObject>("Prefabs/PlayerHUD");
-                    if (hudPrefab != null)
-                    {
-                        GameObject hudObject = Instantiate(hudPrefab);
-                        hudController = hudObject.GetComponent<PlayerHUDController>();
-                        if (hudController != null)
-                        {
-                            Debug.Log("PlayerController: Successfully created PlayerHUDController from prefab");
-                            hudController.Initialize();
-                        }
-                        else
-                        {
-                            Debug.LogWarning("PlayerController: Failed to get PlayerHUDController component from instantiated prefab");
-                        }
-                    }
-                }
-                catch (System.Exception) {
-                    // Silently continue if Resources folder doesn't exist
-                    Debug.LogWarning("PlayerController: Unable to load PlayerHUDController prefab. Game will continue without HUD.");
-                }
-            }
-            else
-            {
-                hudController.Initialize();
-            }
+            SceneManager.sceneLoaded += OnSceneLoaded;
+            // This initial check handles cases where the player is already in the game scene when they spawn.
+            CheckAndSetupForScene(SceneManager.GetActiveScene());
         }
 
         // If this is the server, register this player with the GameManager
@@ -577,7 +510,94 @@ public class PlayerController : NetworkBehaviour
             pursuersIds.OnListChanged -= OnPursuersChanged;
         }
 
+        if (IsOwner)
+        {
+            SceneManager.sceneLoaded -= OnSceneLoaded;
+        }
+
         // Clean up other callbacks or references as needed
+    }
+
+    private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+    {
+        CheckAndSetupForScene(scene);
+    }
+
+    private void CheckAndSetupForScene(Scene scene)
+    {
+        // IMPORTANT: Replace "Game" with the actual name of your main game scene.
+        if (scene.name == "Game")
+        {
+            // Only run setup once. If HUD exists, we're already set up.
+            if (hudController != null) return;
+
+            Debug.Log($"PlayerController: Correct game scene '{scene.name}' loaded. Setting up local player UI.");
+
+            // Instantiate HUD for local player only
+            if (hudPrefab != null)
+            {
+                Canvas mainCanvas = FindObjectOfType<Canvas>();
+                if (mainCanvas != null)
+                {
+                    GameObject hudInstance = Instantiate(hudPrefab, mainCanvas.transform);
+                    hudController = hudInstance.GetComponent<PlayerHUDController>();
+                    if (hudController != null)
+                    {
+                        hudController.Initialize();
+                    }
+                    else
+                    {
+                        Debug.LogWarning("PlayerController: Instantiated HUD prefab does not have a PlayerHUDController component!");
+                    }
+                }
+                else
+                {
+                    Debug.LogWarning("PlayerController: No Canvas found in the game scene. Cannot parent HUD.");
+                }
+            }
+            else
+            {
+                Debug.LogWarning("PlayerController: HUD Prefab not assigned!");
+            }
+
+            // Find the stamina bar UI element, which is now part of the instantiated HUD
+            if (hudController != null)
+            {
+                GameObject staminaBarObject = GameObject.FindGameObjectWithTag("StaminaBarFill");
+                if (staminaBarObject != null)
+                {
+                    staminaBarFill = staminaBarObject.GetComponent<RectTransform>();
+                    if (staminaBarFill != null)
+                    {
+                        Debug.Log("PlayerController: Found and assigned StaminaBarFill RectTransform.");
+                        UpdateStaminaBar();
+                    }
+                }
+                else
+                {
+                    Debug.LogWarning("PlayerController: Could not find GameObject with tag 'StaminaBarFill'. Make sure it's part of your HUD prefab and tagged correctly.");
+                }
+            }
+
+            // Manually trigger the icon update for the initial value.
+            OnCharacterIndexChanged(0, characterIndex.Value);
+
+            // Find the main camera and set its target to this player
+            CameraFollow cameraFollow = Camera.main?.GetComponent<CameraFollow>();
+            if (cameraFollow != null)
+            {
+                Debug.Log("PlayerController: Found CameraFollow, setting target");
+                cameraFollow.SetTarget(transform);
+                cameraFollow.ResetCameraPosition();
+            }
+            else
+            {
+                Debug.LogWarning("PlayerController: Could not find CameraFollow component on main camera");
+            }
+            
+            // We've set up the HUD, no need to listen for more scene changes.
+            SceneManager.sceneLoaded -= OnSceneLoaded;
+        }
     }
 
     private void OnCharacterIndexChanged(int previousValue, int newValue)
