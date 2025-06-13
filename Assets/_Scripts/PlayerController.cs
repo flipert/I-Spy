@@ -295,9 +295,12 @@ public class PlayerController : NetworkBehaviour
             // Update network variables to sync with other clients
             if (IsServer)
             {
-                networkPosition.Value = transform.position;
-                networkIsRunning.Value = isMoving;
-                networkIsFacingLeft.Value = isFacingLeft;
+                if (IsSpawned) // Safety check before writing to NetworkVariables
+                {
+                    networkPosition.Value = transform.position;
+                    networkIsRunning.Value = isMoving;
+                    networkIsFacingLeft.Value = isFacingLeft;
+                }
             }
             else
             {

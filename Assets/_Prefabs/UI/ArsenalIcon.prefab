@@ -193,7 +193,7 @@ GameObject:
   - component: {fileID: 2662825685947724212}
   - component: {fileID: 190791465199266080}
   - component: {fileID: 2530062875873918337}
-  - component: {fileID: 8343295314706466898}
+  - component: {fileID: 126494700954523642}
   m_Layer: 5
   m_Name: CooldownBar
   m_TagString: Untagged
@@ -255,7 +255,7 @@ MonoBehaviour:
   m_FillMethod: 4
   m_FillAmount: 1
   m_FillClockwise: 1
-  m_FillOrigin: 0
+  m_FillOrigin: 2
   m_UseSpriteMesh: 0
   m_PixelsPerUnitMultiplier: 1
 --- !u!114 &2530062875873918337
@@ -273,7 +273,7 @@ MonoBehaviour:
   m_EffectColor: {r: 0, g: 0, b: 0, a: 0.5}
   m_EffectDistance: {x: -2, y: -4}
   m_UseGraphicAlpha: 1
---- !u!114 &8343295314706466898
+--- !u!114 &126494700954523642
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -282,10 +282,17 @@ MonoBehaviour:
   m_GameObject: {fileID: 4162170097597833858}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 31a19414c41e5ae4aae2af33fee712f6, type: 3}
+  m_Script: {fileID: 11500000, guid: 306cc8c2b49d7114eaa3623786fc2126, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  m_ShowMaskGraphic: 1
+  m_IgnoreLayout: 0
+  m_MinWidth: -1
+  m_MinHeight: -1
+  m_PreferredWidth: -1
+  m_PreferredHeight: -1
+  m_FlexibleWidth: 1
+  m_FlexibleHeight: 1
+  m_LayoutPriority: 1
 --- !u!1 &5700985654346931769
 GameObject:
   m_ObjectHideFlags: 0
